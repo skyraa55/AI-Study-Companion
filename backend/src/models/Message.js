@@ -14,6 +14,7 @@ const messageSchema = new mongoose.Schema(
       },
     ],
     aiRequestLog: { type: mongoose.Schema.Types.ObjectId, ref: 'AIRequestLog', default: null },
+    groundedness: { type: String, enum: ['grounded', 'insufficient', null], default: null },
 
     flaggedSignificant: { type: Boolean, default: false },
   },

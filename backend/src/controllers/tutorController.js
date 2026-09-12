@@ -3,7 +3,7 @@ const Message = require('../models/Message');
 const Project = require('../models/Project');
 const asyncHandler = require('../utils/asyncHandler');
 const { callClaude } = require('../services/aiService');
-const { buildProjectContext } = require('../services/contextService');
+const { assembleTutorContext } = require('../services/contextService');
 
 const SUMMARIZE_EVERY_N_MESSAGES = 10;
 
@@ -32,15 +32,13 @@ const getMessages = asyncHandler(async (req, res) => {
   const conversation = await Conversation.findOne({ _id: req.params.id, user: req.user._id });
   if (!conversation) return res.status(404).json({ message: 'Conversation not found.' });
 
-  const messages = await Message.find({ conversation: conversation._id }).sort({ createdAt: 1 });
+  const messages = await Message.find({ conversation: conversation._id })
+    .sort({ createdAt: 1 })
+    .populate('retrievalRefs.materialId', 'title');
+
   res.json({ conversation, messages });
 });
 
-/**
- * Core "Learn with AI Tutor" endpoint. Context is strictly scoped to this
- * conversation's Project (PRD 3.1 Context First) - retrieval, mastery signal,
- * and persistent notes are all queried by project._id, never merged globally.
- */
 const sendMessage = asyncHandler(async (req, res) => {
   const conversation = await Conversation.findOne({ _id: req.params.id, user: req.user._id });
   if (!conversation) return res.status(404).json({ message: 'Conversation not found.' });
@@ -53,29 +51,32 @@ const sendMessage = asyncHandler(async (req, res) => {
 
   const userMessage = await Message.create({ conversation: conversation._id, role: 'user', content });
 
-  const { contextBlock, relevantChunks } = await buildProjectContext(project, content);
+  const { shortTermHistory, longTermContext, projectKnowledge, evidenceStatus, relevantChunks } =
+    await assembleTutorContext({ project, user: req.user, conversation, query: content });
 
-  const recentMessages = await Message.find({ conversation: conversation._id })
-    .sort({ createdAt: -1 })
-    .limit(12);
-  const history = recentMessages.reverse().map((m) => ({ role: m.role, content: m.content }));
+  const evidenceInstruction =
+    evidenceStatus === 'grounded'
+      ? 'Relevant excerpts were found in this Project\'s materials (see "Project Knowledge" below) - ground your answer in them and cite the source + page for anything you use from them.'
+      : 'No relevant excerpts were found in this Project\'s materials for this question. Say so explicitly rather than inventing specifics as if they came from the materials. You may still answer carefully from general understanding if appropriate, clearly flagged as general knowledge, and suggest what kind of material would help.';
 
-  const system = `You are an AI Tutor inside the "${project.name}" project (goal: ${
-    project.goal || 'not specified'
-  }).
-Use ONLY the following grounded project context and conversation summary to inform your
-answer. If the context doesn't contain enough evidence to answer confidently, say so
-explicitly instead of inventing facts (Evidence Over Guessing).
-Never reference or use information from any other project.
+  const system = `You are an AI Tutor inside the "${project.name}" project.
+Priority order for answering: (1) Project Knowledge below, (2) Long-Term Relevant
+Context, (3) Short-Term Context (this conversation), (4) general knowledge only as a
+last resort and clearly flagged as such. Context here is strictly scoped to this
+Project - never use information from any other project (Context First).
 
-Conversation summary so far: ${conversation.summary || '(none yet)'}
+${evidenceInstruction}
 
-Project context:
-${JSON.stringify(contextBlock, null, 2)}
+--- Long-Term Relevant Context (durable, curated - not the full raw history) ---
+${JSON.stringify(longTermContext, null, 2)}
 
-When you rely on a specific excerpt from "retrievedMaterial", mention its source
-title and page number in parentheses (e.g. "(See 'Chapter 2 Notes', p.3)") so the
-learner can locate the evidence themselves.
+--- Project Knowledge (evidence retrieved from this Project's materials for the
+current question) ---
+${JSON.stringify(projectKnowledge, null, 2)}
+
+Show Source: when you rely on a specific excerpt from Project Knowledge, cite its
+source title and page number in parentheses, e.g. "(See 'Chapter 2 Notes', p.3)",
+so the learner can locate the evidence themselves.
 
 Be encouraging, Socratic where useful, and concise. If the learner seems to be
 struggling with a concept, note it plainly so it can be tracked.`;
@@ -85,7 +86,7 @@ struggling with a concept, note it plainly so it can be tracked.`;
     assistantText = await callClaude({
       purpose: 'tutor_chat',
       system,
-      messages: history,
+      messages: shortTermHistory,
       maxTokens: 1000,
       meta: {
         userId: req.user._id,
@@ -103,8 +104,10 @@ struggling with a concept, note it plainly so it can be tracked.`;
     conversation: conversation._id,
     role: 'assistant',
     content: assistantText,
-           retrievalRefs: relevantChunks.map((c) => ({ materialId: c.materialId, chunkOrder: c.chunkOrder, page: c.page })),
+    retrievalRefs: relevantChunks.map((c) => ({ materialId: c.materialId, chunkOrder: c.chunkOrder, page: c.page })),
+    groundedness: evidenceStatus,
   });
+  await assistantMessage.populate('retrievalRefs.materialId', 'title');
 
   conversation.lastMessageAt = new Date();
   await conversation.save();
@@ -119,8 +122,6 @@ struggling with a concept, note it plainly so it can be tracked.`;
   res.status(201).json({ userMessage, assistantMessage });
 });
 
-/** Compresses older turns into conversation.summary (PRD 3.4 Persistent Context:
- * retain useful info across sessions without unbounded growth). */
 async function summarizeConversation(conversationId) {
   const conversation = await Conversation.findById(conversationId);
   if (!conversation) return;
@@ -144,10 +145,8 @@ and anything requiring follow-up. Be factual, no fluff. Output plain text only, 
   await conversation.save();
 }
 
-// Lets a learner (or the UI, based on AI signal) mark a note as significant,
-// persisting it onto the Project's durable context (PRD 3.4).
 const flagSignificantNote = asyncHandler(async (req, res) => {
-  const { note, field } = req.body; // field: importantConcepts | previousDifficulties | significantNotes | areasRequiringAttention
+  const { note, field } = req.body;
   const project = await Project.findOne({ _id: req.params.projectId, user: req.user._id });
   if (!project) return res.status(404).json({ message: 'Project not found.' });
 

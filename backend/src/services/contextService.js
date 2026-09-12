@@ -1,6 +1,8 @@
 const Material = require('../models/Material');
 const Mastery = require('../models/Mastery');
 const Concept = require('../models/Concept');
+const Message = require('../models/Message');
+const QuizAttempt = require('../models/QuizAttempt');
 
 /**
  * PRD 3.1 Context First: a Tutor conversation inside one Project must never
@@ -86,4 +88,76 @@ async function buildProjectContext(project, query) {
   return { contextBlock, relevantChunks };
 }
 
-module.exports = { buildProjectContext, rankRelevantChunks, tokenize };
+const SHORT_TERM_MESSAGE_LIMIT = 8;
+const RECENT_ASSESSMENT_LIMIT = 3;
+
+/**
+ * PRD 17 Contextual Continuity + PRD 18 Grounded AI Learning.
+ *
+ * Assembles a structured, clearly-separated context for a single Tutor turn
+ * instead of indiscriminately sending the entire historical context to every
+ * AI request:
+ *
+ *   - Short-Term Context: only the last few turns of *this* conversation -
+ *     what's needed to understand the current exchange.
+ *   - Long-Term Relevant Context: durable, curated information that stays
+ *     useful across future sessions - the User's learning goal, Project
+ *     context, a compressed conversation summary (not raw transcript),
+ *     concepts needing attention, and recent assessment history.
+ *   - Project Knowledge: evidence retrieved from this Project's processed
+ *     materials for the *current* question only.
+ *
+ * Also performs "Check Supporting Evidence" (PRD 18 step 5): if retrieval
+ * returns nothing, evidenceStatus is 'insufficient' so the caller's prompt
+ * can instruct the model to say so rather than invent an answer.
+ */
+async function assembleTutorContext({ project, user, conversation, query }) {
+  // Identify Project Context (long-term, project-scoped, curated - not a full history dump)
+  const projectContext = {
+    goal: project.goal,
+    importantConcepts: project.context?.importantConcepts || [],
+    previousDifficulties: project.context?.previousDifficulties || [],
+    significantNotes: project.context?.significantNotes || [],
+    areasRequiringAttention: project.context?.areasRequiringAttention || [],
+  };
+
+  // Retrieve Relevant Content -> Project Knowledge
+  const relevantChunks = query ? await rankRelevantChunks(project._id, query) : [];
+  const evidenceStatus = relevantChunks.length > 0 ? 'grounded' : 'insufficient'; // Check Supporting Evidence
+
+  const projectKnowledge = relevantChunks.map((c) => ({
+    source: c.materialTitle,
+    page: c.page,
+    excerpt: c.text,
+  }));
+
+  // Assessment History (long-term signal, kept as a compact summary, not raw attempt dumps)
+  const [weakMastery, recentAttempts] = await Promise.all([
+    Mastery.find({ project: project._id, needsAttention: true }).populate('concept', 'name').limit(10),
+    QuizAttempt.find({ project: project._id, user: user._id, status: 'evaluated' })
+      .sort({ createdAt: -1 })
+      .limit(RECENT_ASSESSMENT_LIMIT)
+      .select('score createdAt'),
+  ]);
+
+  // Short-Term Context: recent turns of THIS conversation only (never other conversations/projects)
+  const recentMessages = conversation
+    ? await Message.find({ conversation: conversation._id }).sort({ createdAt: -1 }).limit(SHORT_TERM_MESSAGE_LIMIT)
+    : [];
+  const shortTermHistory = recentMessages.reverse().map((m) => ({ role: m.role, content: m.content }));
+
+  // Long-Term Relevant Context: durable, compressed - a rolling summary
+  // replaces older raw turns so this never grows unbounded (PRD 3.4 + 17).
+  const longTermContext = {
+    userLearningGoal: user.globalContext?.overallGoals?.length ? user.globalContext.overallGoals : null,
+    learningPreferences: user.globalContext?.learningPreferences || null,
+    project: projectContext,
+    conversationSummary: conversation?.summary || null,
+    conceptsNeedingAttention: weakMastery.map((m) => m.concept?.name).filter(Boolean),
+    recentAssessmentHistory: recentAttempts.map((a) => ({ score: a.score, date: a.createdAt })),
+  };
+
+  return { shortTermHistory, longTermContext, projectKnowledge, evidenceStatus, relevantChunks };
+}
+
+module.exports = { buildProjectContext, rankRelevantChunks, tokenize, assembleTutorContext };

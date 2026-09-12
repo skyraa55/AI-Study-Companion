@@ -2,6 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import api from '../../api/axios';
 import Loader from '../../components/Loader';
 
+const GROUNDEDNESS_STYLE = {
+  grounded: { label: '📚 Grounded in your materials', className: 'bg-green-100 text-green-700' },
+  insufficient: { label: '💭 General knowledge - no matching material found', className: 'bg-amber-100 text-amber-700' },
+};
+
 export default function TutorTab({ projectId }) {
   const [conversations, setConversations] = useState(null);
   const [activeId, setActiveId] = useState(null);
@@ -95,12 +100,31 @@ export default function TutorTab({ projectId }) {
               )}
               {messages.map((m) => (
                 <div key={m._id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div
-                    className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap ${
-                      m.role === 'user' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-800'
-                    }`}
-                  >
-                    {m.content}
+                  <div className={`max-w-[80%] ${m.role === 'user' ? '' : 'w-full'}`}>
+                    <div
+                      className={`rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap ${
+                        m.role === 'user' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-800'
+                      }`}
+                    >
+                      {m.content}
+                    </div>
+
+                    {m.role === 'assistant' && m.groundedness && (
+                      <div className="mt-1.5 space-y-1.5">
+                        <span className={`badge ${GROUNDEDNESS_STYLE[m.groundedness]?.className}`}>
+                          {GROUNDEDNESS_STYLE[m.groundedness]?.label}
+                        </span>
+                        {m.retrievalRefs?.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {dedupeSources(m.retrievalRefs).map((s, i) => (
+                              <span key={i} className="badge bg-white border border-slate-200 text-slate-600">
+                                📄 {s.title}{s.page ? ` · p.${s.page}` : ''}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -126,4 +150,14 @@ export default function TutorTab({ projectId }) {
       </div>
     </div>
   );
+}
+
+function dedupeSources(retrievalRefs) {
+  const seen = new Map();
+  for (const ref of retrievalRefs) {
+    const title = ref.materialId?.title || 'Material';
+    const key = `${title}::${ref.page ?? ''}`;
+    if (!seen.has(key)) seen.set(key, { title, page: ref.page });
+  }
+  return Array.from(seen.values());
 }

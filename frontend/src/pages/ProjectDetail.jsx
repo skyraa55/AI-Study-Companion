@@ -78,7 +78,7 @@ export default function ProjectDetail() {
 
       {activeTab === 'overview' && <OverviewTab projectId={projectId} onNavigate={setActiveTab} />}
       {activeTab === 'materials' && <MaterialsTab projectId={projectId} onChange={loadSummary} />}
-      {activeTab === 'tutor' && <TutorTab projectId={projectId} project={project} />}
+      {activeTab === 'tutor' && <TutorTab projectId={projectId} project={project} onNavigate={setActiveTab} />}
       {activeTab === 'quiz' && <QuizTab projectId={projectId} onChange={loadSummary} />}
       {activeTab === 'mastery' && <MasteryTab projectId={projectId} />}
       {activeTab === 'analytics' && <AnalyticsTab projectId={projectId} />}

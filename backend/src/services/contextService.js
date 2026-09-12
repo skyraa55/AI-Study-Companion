@@ -121,7 +121,7 @@ async function assembleTutorContext({ project, user, conversation, query }) {
     areasRequiringAttention: project.context?.areasRequiringAttention || [],
   };
 
-  // Retrieve Relevant Content -> Project Knowledge
+    // Retrieve Relevant Content -> Project Knowledge
   const relevantChunks = query ? await rankRelevantChunks(project._id, query) : [];
   const evidenceStatus = relevantChunks.length > 0 ? 'grounded' : 'insufficient'; // Check Supporting Evidence
 
@@ -130,6 +130,11 @@ async function assembleTutorContext({ project, user, conversation, query }) {
     page: c.page,
     excerpt: c.text,
   }));
+
+  const [readyMaterialCount, totalMaterialCount] = await Promise.all([
+    Material.countDocuments({ project: project._id, processingStatus: 'ready' }),
+    Material.countDocuments({ project: project._id }),
+  ]);
 
   // Assessment History (long-term signal, kept as a compact summary, not raw attempt dumps)
   const [weakMastery, recentAttempts] = await Promise.all([
@@ -148,13 +153,14 @@ async function assembleTutorContext({ project, user, conversation, query }) {
 
   // Long-Term Relevant Context: durable, compressed - a rolling summary
   // replaces older raw turns so this never grows unbounded (PRD 3.4 + 17).
-  const longTermContext = {
+   const longTermContext = {
     userLearningGoal: user.globalContext?.overallGoals?.length ? user.globalContext.overallGoals : null,
     learningPreferences: user.globalContext?.learningPreferences || null,
     project: projectContext,
     conversationSummary: conversation?.summary || null,
     conceptsNeedingAttention: weakMastery.map((m) => m.concept?.name).filter(Boolean),
     recentAssessmentHistory: recentAttempts.map((a) => ({ score: a.score, date: a.createdAt })),
+    materialsStatus: { readyCount: readyMaterialCount, totalCount: totalMaterialCount },
   };
 
   return { shortTermHistory, longTermContext, projectKnowledge, evidenceStatus, relevantChunks };

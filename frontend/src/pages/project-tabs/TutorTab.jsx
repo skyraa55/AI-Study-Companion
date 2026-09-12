@@ -202,9 +202,28 @@ export default function TutorTab({ projectId, onNavigate }) {
 
 function ActionChip({ action, onNavigate }) {
   const label = ACTION_LABELS[action.name] || `⚙️ ${action.name}`;
-  const isQuizStart = action.name === 'generate_quiz' && action.result?.started;
 
-  if (isQuizStart && onNavigate) {
+  // PRD 23: surface validation/safeguard outcomes distinctly, not just "it ran"
+  if (action.result?.error) {
+    return (
+      <span className="badge bg-amber-50 text-amber-700" title={action.result.error}>
+        ⚠ {label} - blocked
+      </span>
+    );
+  }
+
+  if (action.name === 'generate_quiz' && action.result?.reused) {
+    return (
+      <button
+        onClick={() => onNavigate?.('quiz')}
+        className="badge bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer"
+      >
+        ♻️ Reused existing quiz - view in Quiz tab →
+      </button>
+    );
+  }
+
+  if (action.name === 'generate_quiz' && action.result?.started && onNavigate) {
     return (
       <button
         onClick={() => onNavigate('quiz')}

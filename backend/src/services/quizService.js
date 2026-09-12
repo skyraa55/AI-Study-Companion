@@ -12,22 +12,67 @@ const { updateMasteryFromAttempt } = require('./masteryService');
  * concepts are prioritized, with a couple of well-known concepts mixed in so
  * quizzes reinforce, not just interrogate weaknesses.
  */
+/**
+ * Chooses which concepts the next quiz should target, using several signals
+ * (PRD 24): current mastery, concepts explicitly flagged as needing
+ * attention, and recent mistakes from the last few graded attempts (a
+ * concept the learner just got wrong is reinforced even if their
+ * longer-run mastery score for it looks fine). A couple of well-known
+ * concepts are mixed in so quizzes reinforce, not just interrogate weaknesses.
+ */
 async function selectAdaptiveConcepts(projectId, userId, count = 5) {
   const masteries = await Mastery.find({ project: projectId, user: userId }).populate('concept', 'name');
-  if (masteries.length === 0) return { concepts: [], notes: 'No tracked concepts yet - quiz will cover material broadly.' };
 
-  const sorted = [...masteries].sort((a, b) => a.masteryScore - b.masteryScore);
-  const weak = sorted.slice(0, Math.ceil(count * 0.7)).map((m) => m.concept?.name).filter(Boolean);
-  const strong = sorted
-    .slice(-Math.floor(count * 0.3))
+  // Recent mistakes (PRD 24 "Recent mistakes"): last few graded attempts,
+  // regardless of the concept's overall mastery score.
+  const recentAttempts = await QuizAttempt.find({ project: projectId, user: userId, status: 'evaluated' })
+    .sort({ createdAt: -1 })
+    .limit(5);
+
+  const recentMistakeCounts = new Map();
+  for (const attempt of recentAttempts) {
+    for (const answer of attempt.answers) {
+      if (!answer.isCorrect) {
+        recentMistakeCounts.set(answer.concept, (recentMistakeCounts.get(answer.concept) || 0) + 1);
+      }
+    }
+  }
+  const recentMistakeConcepts = Array.from(recentMistakeCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([name]) => name);
+
+  if (masteries.length === 0 && recentMistakeConcepts.length === 0) {
+    return { concepts: [], notes: 'No tracked concepts yet - quiz will cover material broadly.' };
+  }
+
+  const sortedByMastery = [...masteries].sort((a, b) => a.masteryScore - b.masteryScore);
+  const weak = sortedByMastery.slice(0, Math.ceil(count * 0.6)).map((m) => m.concept?.name).filter(Boolean);
+  const strong = sortedByMastery
+    .slice(-Math.floor(count * 0.2))
     .map((m) => m.concept?.name)
     .filter(Boolean);
 
-  const concepts = Array.from(new Set([...weak, ...strong])).slice(0, count);
+  // Recent mistakes take priority even over the mastery-ranked weak list
+  const concepts = Array.from(new Set([...recentMistakeConcepts, ...weak, ...strong])).slice(0, count);
+
   return {
     concepts,
-    notes: `Prioritized ${weak.length} lower-mastery concept(s) with light reinforcement of stronger ones.`,
+    notes: `Prioritized ${recentMistakeConcepts.length} concept(s) with recent mistakes and ${weak.length} lower-mastery concept(s), with light reinforcement of stronger ones.`,
   };
+}
+
+/**
+ * Gathers recently-asked question prompts for this Project/user (PRD 24
+ * "Question history") so the generator can avoid asking near-duplicates and
+ * instead probe the same concepts from a different angle.
+ */
+async function getRecentQuestionHistory(projectId, userId, limit = 15) {
+  const quizzes = await Quiz.find({ project: projectId, user: userId, status: 'ready' })
+    .sort({ createdAt: -1 })
+    .limit(3)
+    .select('questions.prompt');
+  const prompts = quizzes.flatMap((q) => q.questions.map((qq) => qq.prompt));
+  return prompts.slice(0, limit);
 }
 
 /** Background job handler: 'quiz_generation' */
@@ -39,16 +84,23 @@ async function generateQuizJob(job) {
   const project = await Project.findById(quiz.project);
   if (!project) throw new Error('Project not found');
 
-  try {
+   try {
     const { concepts, notes } = await selectAdaptiveConcepts(quiz.project, quiz.user);
     const focusQuery = concepts.join(', ') || project.goal || project.name;
     const { contextBlock } = await buildProjectContext(project, focusQuery);
+    const questionHistory = await getRecentQuestionHistory(quiz.project, quiz.user);
 
     const system = `You are an adaptive quiz generator for a learning platform.
 Generate a quiz grounded ONLY in the provided project context and retrieved material excerpts.
 If the retrieved material is insufficient for a concept, write a question testing general
 understanding of that concept's name/definition rather than inventing specific facts not
 present in the context.
+
+Question History (PRD 24 - avoid repetition): the learner has recently been asked these
+questions in this Project. Do NOT repeat or closely paraphrase any of them - if a concept
+needs re-testing, ask about it from a different angle (different scenario, format, or
+sub-aspect) instead:
+${questionHistory.length > 0 ? JSON.stringify(questionHistory) : '(no prior questions on record)'}
 
 Respond with STRICT JSON only in this exact shape:
 {
@@ -64,8 +116,11 @@ Respond with STRICT JSON only in this exact shape:
     }
   ]
 }
-Generate 5-8 questions. Mix question types. Target these concepts when relevant: ${concepts.join(', ') || '(none tracked yet - cover the material generally)'
-      }.`;
+Generate 5-8 questions total. REQUIRED mix (PRD 24 - support both formats): at least 2
+multiple-choice (mcq) questions AND at least 1 open-ended (short_answer) question; the
+remaining questions can be any type. Target these concepts when relevant: ${
+      concepts.join(', ') || '(none tracked yet - cover the material generally)'
+    }.`;
 
     const userContent = JSON.stringify({ context: contextBlock }, null, 2);
 
@@ -87,8 +142,22 @@ Generate 5-8 questions. Mix question types. Target these concepts when relevant:
       throw new Error('AI returned no questions');
     }
 
+    // Backend validation, not blind trust in model output (mirrors PRD 23's
+    // principle applied here to quiz content): enforce the required type mix
+    // rather than assuming the model followed instructions.
+    const hasMcq = parsed.questions.some((q) => q.type === 'mcq');
+    const hasOpenEnded = parsed.questions.some((q) => q.type === 'short_answer');
+    if (!hasMcq || !hasOpenEnded) {
+      console.warn(
+        `[quizService] Generated quiz ${quiz._id} did not satisfy the required mcq+open-ended mix (hasMcq=${hasMcq}, hasOpenEnded=${hasOpenEnded}) - keeping questions as-is but flagging in notes.`
+      );
+    }
+
     quiz.questions = parsed.questions;
-    quiz.adaptiveContext = { targetedConcepts: concepts, generationNotes: notes };
+    quiz.adaptiveContext = {
+      targetedConcepts: concepts,
+      generationNotes: notes + (!hasMcq || !hasOpenEnded ? ' (Note: requested type mix was not fully met by the model.)' : ''),
+    };
     quiz.status = 'ready';
     await quiz.save();
 

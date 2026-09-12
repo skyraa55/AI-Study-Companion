@@ -4,7 +4,7 @@ const Project = require('../models/Project');
 const asyncHandler = require('../utils/asyncHandler');
 const { callClaude, callClaudeWithTools } = require('../services/aiService');
 const { assembleTutorContext } = require('../services/contextService');
-const { TOOLS, executeCapability } = require('../services/aiCapabilities');
+const { TOOLS, executeCapability, SIDE_EFFECT_TOOLS } = require('../services/aiCapabilities');
 
 const SUMMARIZE_EVERY_N_MESSAGES = 10;
 
@@ -105,11 +105,26 @@ generate a real quiz, and record durable learning notes. Prefer calling a tool o
 guessing when the learner asks something a tool can answer authoritatively (e.g.
 "how am I doing?" -> get_learner_progress; "test me" -> generate_quiz).
 
+Action Boundaries (PRD 23): generate_quiz and record_learning_event are
+state-changing - the backend validates every call and allows at most one such
+action per response, so use them deliberately rather than speculatively.
+
 Be encouraging, Socratic where useful, and concise. If the learner seems to be
 struggling with a concept, consider recording it via record_learning_event.`;
 
-  const boundExecuteTool = (name, input) => executeCapability(name, input, { project, user: req.user, conversation });
-
+let sideEffectCount = 0;
+  const boundExecuteTool = (name, input) => {
+    if (SIDE_EFFECT_TOOLS.has(name)) {
+      if (sideEffectCount >= 1) {
+        return Promise.resolve({
+          error:
+            'Safeguard: only one state-changing action (e.g. generating a quiz or recording a note) is allowed per response. Ask again in a follow-up message if you still want this.',
+        });
+      }
+      sideEffectCount += 1;
+    }
+    return executeCapability(name, input, { project, user: req.user, conversation });
+  };
   let assistantText;
   let toolCalls = [];
   try {

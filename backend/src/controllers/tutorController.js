@@ -73,6 +73,10 @@ Conversation summary so far: ${conversation.summary || '(none yet)'}
 Project context:
 ${JSON.stringify(contextBlock, null, 2)}
 
+When you rely on a specific excerpt from "retrievedMaterial", mention its source
+title and page number in parentheses (e.g. "(See 'Chapter 2 Notes', p.3)") so the
+learner can locate the evidence themselves.
+
 Be encouraging, Socratic where useful, and concise. If the learner seems to be
 struggling with a concept, note it plainly so it can be tracked.`;
 
@@ -99,7 +103,7 @@ struggling with a concept, note it plainly so it can be tracked.`;
     conversation: conversation._id,
     role: 'assistant',
     content: assistantText,
-    retrievalRefs: relevantChunks.map((c) => ({ materialId: c.materialId, chunkOrder: c.chunkOrder })),
+           retrievalRefs: relevantChunks.map((c) => ({ materialId: c.materialId, chunkOrder: c.chunkOrder, page: c.page })),
   });
 
   conversation.lastMessageAt = new Date();

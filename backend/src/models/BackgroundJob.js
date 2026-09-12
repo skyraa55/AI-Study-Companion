@@ -1,9 +1,5 @@
 const mongoose = require('mongoose');
 
-// Simple observable job record for async work (PRD 3.5 Asynchronous by Design,
-// 3.6 Observable AI -> "Background workflows"). Execution is handled by an
-// in-process async job runner (src/services/jobQueue.js) - swap-able for a real
-// queue (BullMQ/Redis, SQS, etc.) in production without changing this schema.
 const backgroundJobSchema = new mongoose.Schema(
   {
     type: {
@@ -20,9 +16,15 @@ const backgroundJobSchema = new mongoose.Schema(
     },
     status: { type: String, enum: ['queued', 'running', 'completed', 'failed'], default: 'queued' },
 
+    stage: { type: String, default: null },
+    progress: { type: Number, default: 0 },
+
+    retryCount: { type: Number, default: 0 },
+    maxRetries: { type: Number, default: 2 },
+
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     project: { type: mongoose.Schema.Types.ObjectId, ref: 'Project', default: null },
-    relatedId: { type: mongoose.Schema.Types.ObjectId, default: null }, // e.g. materialId, quizId, attemptId
+    relatedId: { type: mongoose.Schema.Types.ObjectId, default: null },
 
     input: { type: mongoose.Schema.Types.Mixed, default: {} },
     result: { type: mongoose.Schema.Types.Mixed, default: null },
@@ -36,6 +38,7 @@ const backgroundJobSchema = new mongoose.Schema(
 );
 
 backgroundJobSchema.index({ status: 1, type: 1 });
+backgroundJobSchema.index({ type: 1, relatedId: 1, status: 1 });
 backgroundJobSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('BackgroundJob', backgroundJobSchema);

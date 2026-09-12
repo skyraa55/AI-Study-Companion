@@ -1,6 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import api from '../../api/axios';
 import EmptyState from '../../components/EmptyState';
+import ProgressBar from '../../components/ProgressBar';
+
+const STAGE_LABELS = {
+  queued: 'Queued',
+  reading_content: 'Reading Content',
+  understanding_structure: 'Understanding Structure',
+  extracting_knowledge: 'Extracting Knowledge',
+  creating_search_index: 'Creating Searchable Representation',
+  ready: 'Ready',
+  failed: 'Failed',
+};
 
 const STATUS_STYLES = {
   pending: 'bg-slate-100 text-slate-600',
@@ -9,9 +20,17 @@ const STATUS_STYLES = {
   failed: 'bg-red-100 text-red-700',
 };
 
+const IN_PROGRESS_STAGES = [
+  'queued',
+  'reading_content',
+  'understanding_structure',
+  'extracting_knowledge',
+  'creating_search_index',
+];
+
 export default function MaterialsTab({ projectId, onChange }) {
   const [materials, setMaterials] = useState(null);
-  const [mode, setMode] = useState(null); // 'text' | 'file' | null
+  const [mode, setMode] = useState(null);
   const [textForm, setTextForm] = useState({ title: '', content: '' });
   const [submitting, setSubmitting] = useState(false);
   const [expanded, setExpanded] = useState(null);
@@ -29,11 +48,10 @@ export default function MaterialsTab({ projectId, onChange }) {
     // eslint-disable-next-line
   }, [projectId]);
 
-  // Poll while any material is pending/processing so status updates appear without a manual refresh
   useEffect(() => {
     clearInterval(pollRef.current);
-    if (materials?.some((m) => ['pending', 'processing'].includes(m.processingStatus))) {
-      pollRef.current = setInterval(load, 3000);
+    if (materials?.some((m) => IN_PROGRESS_STAGES.includes(m.processingStage))) {
+      pollRef.current = setInterval(load, 2500);
     }
     return () => clearInterval(pollRef.current);
     // eslint-disable-next-line
@@ -101,7 +119,8 @@ export default function MaterialsTab({ projectId, onChange }) {
     <div>
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm text-slate-500">
-          Materials are processed asynchronously: text is chunked and the AI extracts a summary + key concepts.
+          Materials are processed in the background through several stages: reading content,
+          understanding structure, extracting knowledge, and building a searchable representation.
         </p>
         <div className="flex gap-2">
           <button className="btn-secondary" onClick={() => setMode(mode === 'text' ? null : 'text')}>+ Paste text</button>
@@ -135,7 +154,10 @@ export default function MaterialsTab({ projectId, onChange }) {
       {mode === 'file' && (
         <form onSubmit={submitFile} className="card p-5 mb-6 space-y-3">
           <input ref={fileRef} type="file" accept=".pdf,.txt" className="input-field" required />
-          <p className="text-xs text-slate-400">Supported: .pdf, .txt (max 15MB)</p>
+          <p className="text-xs text-slate-400">
+            Supported: .pdf, .txt (max 15MB). Scanned/image-only PDFs are detected and flagged -
+            OCR isn't supported yet in this prototype.
+          </p>
           <button type="submit" disabled={submitting} className="btn-primary">
             {submitting ? 'Uploading...' : 'Upload'}
           </button>
@@ -150,11 +172,27 @@ export default function MaterialsTab({ projectId, onChange }) {
             <div key={m._id} className="card p-4">
               <div className="flex items-center justify-between">
                 <button className="text-left flex-1" onClick={() => openDetail(m)}>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium text-slate-800">{m.title}</span>
-                    <span className={`badge ${STATUS_STYLES[m.processingStatus]}`}>{m.processingStatus}</span>
+                    <span className={`badge ${STATUS_STYLES[m.processingStatus]}`}>
+                      {STAGE_LABELS[m.processingStage] || m.processingStatus}
+                    </span>
+                    {m.possiblyScanned && (
+                      <span className="badge bg-amber-100 text-amber-700">⚠ Possibly scanned</span>
+                    )}
+                    {m.retryCount > 0 && m.processingStatus !== 'ready' && (
+                      <span className="badge bg-slate-100 text-slate-500">Retry {m.retryCount}</span>
+                    )}
                   </div>
-                  <p className="text-xs text-slate-400 mt-0.5">{m.type} · added {new Date(m.createdAt).toLocaleDateString()}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {m.type} · added {new Date(m.createdAt).toLocaleDateString()}
+                    {m.pageCount > 1 ? ` · ${m.pageCount} pages` : ''}
+                  </p>
+                  {IN_PROGRESS_STAGES.includes(m.processingStage) && (
+                    <div className="mt-2 max-w-xs">
+                      <ProgressBar value={m.processingProgress || 0} />
+                    </div>
+                  )}
                 </button>
                 <div className="flex gap-2">
                   {m.processingStatus === 'failed' && (
@@ -169,16 +207,26 @@ export default function MaterialsTab({ projectId, onChange }) {
                   {detail.knowledge?.summary ? (
                     <>
                       <p className="text-slate-600 mb-2">{detail.knowledge.summary}</p>
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="flex flex-wrap gap-1.5 mb-2">
                         {detail.knowledge.keyConcepts?.map((c, i) => (
                           <span key={i} className="badge bg-brand-50 text-brand-700">{c}</span>
                         ))}
                       </div>
+                      <p className="text-xs text-slate-400">
+                        {detail.knowledge.chunks?.length || 0} searchable chunks
+                        {detail.structure?.hasTables ? ' · tables detected' : ''}
+                        {detail.structure?.headingCount ? ` · ${detail.structure.headingCount} headings` : ''}
+                      </p>
                     </>
                   ) : (
                     <p className="text-slate-400 italic">Processing not complete yet.</p>
                   )}
-                  {detail.processingError && <p className="text-red-600 mt-2">Error: {detail.processingError}</p>}
+                  {detail.processingError && (
+                    <p className="text-red-600 mt-2">
+                      {detail.processingStatus === 'failed' ? 'Failed: ' : 'Last attempt error (retrying): '}
+                      {detail.processingError}
+                    </p>
+                  )}
                 </div>
               )}
             </div>

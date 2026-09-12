@@ -1,27 +1,21 @@
 const BackgroundJob = require('../models/BackgroundJob');
 
-/**
- * PRD 3.5 Asynchronous by Design: long-running operations (document processing,
- * knowledge extraction, quiz generation/evaluation, analytics aggregation,
- * recommendations) should not block the request/response cycle.
- *
- * This is an in-process job runner intended for a prototype: enqueue() returns
- * immediately with a queued BackgroundJob, and the handler runs on the next
- * tick. Every job is recorded (PRD 3.6 Observable AI -> "Background workflows")
- * so the API/Admin Dashboard can show status, duration, and failures.
- *
- * In production this would be swapped for a durable queue (BullMQ + Redis,
- * SQS, etc.) - the BackgroundJob schema and handler signature are designed to
- * make that swap straightforward without touching calling code.
- */
-
-const handlers = {}; // type -> async (job) => result
+const handlers = {};
 
 function registerHandler(type, handler) {
   handlers[type] = handler;
 }
 
-async function enqueue({ type, user, project, relatedId, input }) {
+async function enqueue({ type, user, project, relatedId, input, maxRetries = 2 }) {
+  if (relatedId) {
+    const existing = await BackgroundJob.findOne({
+      type,
+      relatedId,
+      status: { $in: ['queued', 'running'] },
+    });
+    if (existing) return existing;
+  }
+
   const job = await BackgroundJob.create({
     type,
     user: user || null,
@@ -29,12 +23,22 @@ async function enqueue({ type, user, project, relatedId, input }) {
     relatedId: relatedId || null,
     input: input || {},
     status: 'queued',
+    maxRetries,
   });
 
-  // Run asynchronously - do not await in the caller's request cycle
   setImmediate(() => runJob(job._id));
-
   return job;
+}
+
+async function updateProgress(jobId, { stage, progress } = {}) {
+  const update = {};
+  if (stage !== undefined) update.stage = stage;
+  if (progress !== undefined) update.progress = progress;
+  if (Object.keys(update).length === 0) return;
+
+  await BackgroundJob.findByIdAndUpdate(jobId, update).catch((err) =>
+    console.error('[jobQueue] updateProgress failed:', err.message)
+  );
 }
 
 async function runJob(jobId) {
@@ -51,7 +55,8 @@ async function runJob(jobId) {
   }
 
   job.status = 'running';
-  job.startedAt = new Date();
+  job.startedAt = job.startedAt || new Date();
+  job.error = null;
   await job.save();
 
   const start = Date.now();
@@ -59,15 +64,33 @@ async function runJob(jobId) {
     const result = await handler(job);
     job.status = 'completed';
     job.result = result || null;
+    job.progress = 100;
+    job.finishedAt = new Date();
+    job.durationMs = Date.now() - start;
+    await job.save();
   } catch (err) {
-    console.error(`[jobQueue] Job ${job._id} (${job.type}) failed:`, err.message);
+    console.error(
+      `[jobQueue] Job ${job._id} (${job.type}) failed (attempt ${job.retryCount + 1}/${job.maxRetries + 1}):`,
+      err.message
+    );
+
+    if (job.retryCount < job.maxRetries) {
+      job.retryCount += 1;
+      job.status = 'queued';
+      job.error = err.message;
+      await job.save();
+
+      const delayMs = Math.min(2 ** job.retryCount * 1000, 15000);
+      setTimeout(() => runJob(job._id), delayMs);
+      return;
+    }
+
     job.status = 'failed';
     job.error = err.message;
-  } finally {
     job.finishedAt = new Date();
     job.durationMs = Date.now() - start;
     await job.save();
   }
 }
 
-module.exports = { registerHandler, enqueue };
+module.exports = { registerHandler, enqueue, updateProgress };

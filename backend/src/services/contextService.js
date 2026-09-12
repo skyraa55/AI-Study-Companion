@@ -37,11 +37,12 @@ async function rankRelevantChunks(projectId, query, limit = 6) {
       for (const term of chunkTerms) {
         if (queryTerms.has(term)) overlap += 1;
       }
-      if (overlap > 0) {
+            if (overlap > 0) {
         scored.push({
           materialId: material._id,
           materialTitle: material.title,
           chunkOrder: chunk.order,
+          page: chunk.page ?? null,
           text: chunk.text,
           score: overlap,
         });
@@ -75,8 +76,9 @@ async function buildProjectContext(project, query) {
     significantNotes: project.context?.significantNotes || [],
     areasRequiringAttention: project.context?.areasRequiringAttention || [],
     conceptsNeedingAttention: weakMastery.map((m) => m.concept?.name).filter(Boolean),
-    retrievedMaterial: relevantChunks.map((c) => ({
+        retrievedMaterial: relevantChunks.map((c) => ({
       source: c.materialTitle,
+      page: c.page,
       excerpt: c.text,
     })),
   };

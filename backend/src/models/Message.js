@@ -6,16 +6,16 @@ const messageSchema = new mongoose.Schema(
     role: { type: String, enum: ['user', 'assistant', 'system'], required: true },
     content: { type: String, required: true },
 
-    // Observability: which materials/concepts were retrieved to ground this reply
     retrievalRefs: [
       {
         materialId: { type: mongoose.Schema.Types.ObjectId, ref: 'Material' },
         chunkOrder: Number,
+        page: Number,
       },
     ],
     aiRequestLog: { type: mongoose.Schema.Types.ObjectId, ref: 'AIRequestLog', default: null },
 
-    flaggedSignificant: { type: Boolean, default: false }, // marked for persistent context
+    flaggedSignificant: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

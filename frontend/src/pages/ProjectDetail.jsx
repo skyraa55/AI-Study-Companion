@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import api from '../api/axios';
 import Loader from '../components/Loader';
 import ProgressBar from '../components/ProgressBar';
+import OverviewTab from './project-tabs/OverviewTab';
 
 import MaterialsTab from './project-tabs/MaterialsTab';
 import TutorTab from './project-tabs/TutorTab';
@@ -11,6 +12,7 @@ import MasteryTab from './project-tabs/MasteryTab';
 import AnalyticsTab from './project-tabs/AnalyticsTab';
 
 const TABS = [
+   { key: 'overview', label: '🏠 Overview' },
   { key: 'materials', label: '📄 Materials' },
   { key: 'tutor', label: '🤖 AI Tutor' },
   { key: 'quiz', label: '📝 Quiz' },
@@ -21,7 +23,7 @@ const TABS = [
 export default function ProjectDetail() {
   const { projectId } = useParams();
   const [summary, setSummary] = useState(null);
-  const [activeTab, setActiveTab] = useState('materials');
+  const [activeTab, setActiveTab] = useState('overview');
 
   const loadSummary = () => {
     api.get(`/projects/${projectId}/summary`).then((res) => setSummary(res.data));
@@ -74,6 +76,7 @@ export default function ProjectDetail() {
         ))}
       </div>
 
+      {activeTab === 'overview' && <OverviewTab projectId={projectId} onNavigate={setActiveTab} />}
       {activeTab === 'materials' && <MaterialsTab projectId={projectId} onChange={loadSummary} />}
       {activeTab === 'tutor' && <TutorTab projectId={projectId} project={project} />}
       {activeTab === 'quiz' && <QuizTab projectId={projectId} onChange={loadSummary} />}

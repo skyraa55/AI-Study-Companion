@@ -5,6 +5,7 @@ const Mastery = require('../models/Mastery');
 const Concept = require('../models/Concept');
 const Quiz = require('../models/Quiz');
 const QuizAttempt = require('../models/QuizAttempt');
+const QuizSession = require('../models/QuizSession');
 const Conversation = require('../models/Conversation');
 const AnalyticsSnapshot = require('../models/AnalyticsSnapshot');
 const asyncHandler = require('../utils/asyncHandler');
@@ -79,12 +80,25 @@ const getProjectSummary = asyncHandler(async (req, res) => {
   const project = await Project.findOne({ _id: req.params.id, user: req.user._id });
   if (!project) return res.status(404).json({ message: 'Project not found.' });
 
-  const [materialCount, readyMaterialCount, conceptCount, masteries, attemptCount] = await Promise.all([
-    Material.countDocuments({ project: project._id }),
-    Material.countDocuments({ project: project._id, processingStatus: 'ready' }),
-    Concept.countDocuments({ project: project._id }),
-    Mastery.find({ project: project._id, user: req.user._id }),
-    QuizAttempt.countDocuments({ project: project._id, user: req.user._id, status: 'evaluated' }),
+   const [masteries, conversations, quizAttempts, adaptiveSessions, materials, latestSnapshot] = await Promise.all([
+    Mastery.find({ project: project._id, user: req.user._id }).populate('concept', 'name description'),
+    Conversation.find({ project: project._id, user: req.user._id, archived: false })
+      .sort({ lastMessageAt: -1 })
+      .limit(5),
+    QuizAttempt.find({ project: project._id, user: req.user._id, status: 'evaluated' })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .populate('quiz', 'title'),
+    QuizSession.find({ project: project._id, user: req.user._id, status: 'completed' })
+      .sort({ completedAt: -1 })
+      .limit(10),
+    Material.find({ project: project._id, user: req.user._id })
+      .select('title processingStatus createdAt')
+      .sort({ createdAt: -1 })
+      .limit(5),
+    AnalyticsSnapshot.findOne({ project: project._id, user: req.user._id, scope: 'project' }).sort({
+      createdAt: -1,
+    }),
   ]);
 
   res.json({
@@ -141,12 +155,19 @@ const getProjectDashboard = asyncHandler(async (req, res) => {
       detail: c.summary ? c.summary.slice(0, 120) : 'Tutor session',
       timestamp: c.lastMessageAt,
     })),
-    ...quizAttempts.map((a) => ({
+        ...quizAttempts.map((a) => ({
       type: 'quiz',
       id: a._id,
       title: a.quiz?.title || 'Quiz',
       detail: `Scored ${a.score}% (${a.correctCount}/${a.totalQuestions})`,
       timestamp: a.createdAt,
+    })),
+    ...adaptiveSessions.map((s) => ({
+      type: 'quiz',
+      id: s._id,
+      title: 'Adaptive Quiz',
+      detail: `Scored ${s.score}% (${s.correctCount}/${s.questions.length})`,
+      timestamp: s.completedAt || s.updatedAt,
     })),
     ...materials.map((m) => ({
       type: 'material',
@@ -159,23 +180,28 @@ const getProjectDashboard = asyncHandler(async (req, res) => {
     .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
     .slice(0, 8);
 
-  // --- Learning Performance -------------------------------------------
-  const scoreHistory = quizAttempts
-    .slice()
-    .reverse()
-    .map((a) => ({ date: a.createdAt, score: a.score }));
+  // --- Learning Performance (combines legacy batch attempts and the newer
+  // adaptive quiz engine's completed sessions - PRD 25-28) -----------------
+  const combinedResults = [
+    ...quizAttempts.map((a) => ({ date: a.createdAt, score: a.score })),
+    ...adaptiveSessions.map((s) => ({ date: s.completedAt || s.updatedAt, score: s.score })),
+  ].sort((a, b) => new Date(a.date) - new Date(b.date));
 
-  const averageScore = quizAttempts.length
-    ? Math.round(quizAttempts.reduce((s, a) => s + a.score, 0) / quizAttempts.length)
+  const scoreHistory = combinedResults;
+  const totalQuizCount = combinedResults.length;
+
+  const averageScore = totalQuizCount
+    ? Math.round(combinedResults.reduce((s, r) => s + r.score, 0) / totalQuizCount)
     : 0;
 
   let performanceTrend = 'stable';
-  if (quizAttempts.length >= 2) {
-    const recent = quizAttempts.slice(0, Math.min(3, quizAttempts.length));
-    const older = quizAttempts.slice(3, Math.min(6, quizAttempts.length));
+  if (totalQuizCount >= 2) {
+    const mostRecentFirst = [...combinedResults].reverse();
+    const recent = mostRecentFirst.slice(0, Math.min(3, totalQuizCount));
+    const older = mostRecentFirst.slice(3, Math.min(6, totalQuizCount));
     if (older.length > 0) {
-      const recentAvg = recent.reduce((s, a) => s + a.score, 0) / recent.length;
-      const olderAvg = older.reduce((s, a) => s + a.score, 0) / older.length;
+      const recentAvg = recent.reduce((s, r) => s + r.score, 0) / recent.length;
+      const olderAvg = older.reduce((s, r) => s + r.score, 0) / older.length;
       if (recentAvg > olderAvg + 5) performanceTrend = 'improving';
       else if (recentAvg < olderAvg - 5) performanceTrend = 'declining';
     }
@@ -185,6 +211,9 @@ const getProjectDashboard = asyncHandler(async (req, res) => {
   const continueLearning = recentActivity[0] || null;
 
   // --- Recommended Next Step ------------------------------------------
+  // Prefer the latest AI-generated recommendation (Analytics tab); fall back
+  // to a fast rule-based suggestion so the dashboard never calls the AI
+  // synchronously (Asynchronous by Design).
   let recommendedNextStep = latestSnapshot?.recommendations?.[0] || null;
   if (!recommendedNextStep) {
     const weakest = concepts.find((c) => c.needsAttention);
@@ -192,7 +221,7 @@ const getProjectDashboard = asyncHandler(async (req, res) => {
       recommendedNextStep = 'Add your first learning material to get started.';
     } else if (weakest) {
       recommendedNextStep = `Review "${weakest.name}" with the AI Tutor, then retake a quiz to reinforce it.`;
-    } else if (quizAttempts.length === 0) {
+    } else if (totalQuizCount === 0) {
       recommendedNextStep = 'Take your first adaptive quiz to establish a mastery baseline.';
     } else {
       recommendedNextStep = 'Keep the momentum going - start a new Tutor session or try a fresh quiz.';
@@ -213,7 +242,7 @@ const getProjectDashboard = asyncHandler(async (req, res) => {
     progress: project.progress,
     concepts,
     recentActivity,
-    performance: { averageScore, quizzesTaken: quizAttempts.length, trend: performanceTrend, scoreHistory },
+    performance: { averageScore, quizzesTaken: totalQuizCount, trend: performanceTrend, scoreHistory },
     continueLearning,
     recommendedNextStep,
     learningContext,

@@ -61,4 +61,45 @@ async function recalculateProjectProgress(projectId) {
   return progress;
 }
 
-module.exports = { updateMasteryFromAttempt, recalculateProjectProgress };
+
+
+/**
+ * Updates a single concept's Mastery immediately after ONE answered question
+ * (PRD 26 Adaptive Quiz Flow: "Evaluate Answer -> Update Mastery -> Select
+ * Next Question"). Uses a smaller blend step than the batch update below
+ * since it fires much more frequently (once per question rather than once
+ * per whole quiz), so any single answer doesn't swing the score too hard.
+ */
+async function updateMasteryForAnswer({ projectId, userId, conceptName, isCorrect }) {
+  const concept = await Concept.findOneAndUpdate(
+    { project: projectId, name: conceptName },
+    {},
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  );
+
+  let mastery = await Mastery.findOne({ project: projectId, concept: concept._id, user: userId });
+  if (!mastery) {
+    mastery = new Mastery({ project: projectId, concept: concept._id, user: userId });
+  }
+
+  const previousScore = mastery.masteryScore;
+  mastery.attemptsCount += 1;
+  if (isCorrect) mastery.correctCount += 1;
+
+  const attemptScore = isCorrect ? 100 : 0;
+  const nextScore = Math.round(previousScore * 0.75 + attemptScore * 0.25);
+  mastery.masteryScore = Math.max(0, Math.min(100, nextScore));
+
+  if (mastery.masteryScore > previousScore + 3) mastery.trend = 'improving';
+  else if (mastery.masteryScore < previousScore - 3) mastery.trend = 'declining';
+  else mastery.trend = mastery.attemptsCount <= 1 ? 'new' : 'stable';
+
+  mastery.needsAttention = mastery.masteryScore < 60;
+  mastery.lastEvaluatedAt = new Date();
+  await mastery.save();
+
+  await recalculateProjectProgress(projectId);
+  return mastery;
+}
+
+module.exports = { updateMasteryFromAttempt, updateMasteryForAnswer, recalculateProjectProgress };

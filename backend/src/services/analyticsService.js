@@ -1,5 +1,6 @@
 const Mastery = require('../models/Mastery');
 const QuizAttempt = require('../models/QuizAttempt');
+const QuizSession = require('../models/QuizSession');
 const Message = require('../models/Message');
 const Conversation = require('../models/Conversation');
 const Project = require('../models/Project');
@@ -8,8 +9,9 @@ const AnalyticsSnapshot = require('../models/AnalyticsSnapshot');
 const { callClaude, parseJSONResponse } = require('./aiService');
 
 async function computeProjectMetrics(projectId, userId) {
-  const [attempts, masteries, conversations] = await Promise.all([
+  const [attempts, adaptiveSessions, masteries, conversations] = await Promise.all([
     QuizAttempt.find({ project: projectId, user: userId, status: 'evaluated' }),
+    QuizSession.find({ project: projectId, user: userId, status: 'completed' }), // PRD 25-28 adaptive quiz engine
     Mastery.find({ project: projectId, user: userId }),
     Conversation.find({ project: projectId, user: userId }).select('_id'),
   ]);
@@ -19,18 +21,22 @@ async function computeProjectMetrics(projectId, userId) {
     ? await Message.countDocuments({ conversation: { $in: conversationIds }, role: 'user' })
     : 0;
 
-  const averageScore = attempts.length
-    ? Math.round(attempts.reduce((s, a) => s + a.score, 0) / attempts.length)
+  // Both quiz systems count toward activity/score metrics - the adaptive
+  // engine is now the primary UX, but historical batch-quiz data still counts.
+  const combinedQuizCount = attempts.length + adaptiveSessions.length;
+  const combinedScores = [...attempts.map((a) => a.score), ...adaptiveSessions.map((s) => s.score)];
+  const averageScore = combinedScores.length
+    ? Math.round(combinedScores.reduce((s, v) => s + v, 0) / combinedScores.length)
     : 0;
 
   const conceptsMastered = masteries.filter((m) => m.masteryScore >= 80).length;
   const conceptsNeedingAttention = masteries.filter((m) => m.needsAttention).length;
 
   // Rough engagement-time estimate for prototype purposes (not real time-tracking)
-  const totalTimeMinutesEstimate = totalTutorMessages * 1.5 + attempts.length * 5;
+  const totalTimeMinutesEstimate = totalTutorMessages * 1.5 + combinedQuizCount * 5;
 
   return {
-    quizzesTaken: attempts.length,
+    quizzesTaken: combinedQuizCount,
     averageScore,
     conceptsTracked: masteries.length,
     conceptsMastered,
@@ -39,6 +45,38 @@ async function computeProjectMetrics(projectId, userId) {
     totalTutorMessages,
     totalTimeMinutesEstimate: Math.round(totalTimeMinutesEstimate),
   };
+}
+
+async function computeStreakDays(projectId, userId) {
+  const [attempts, adaptiveSessions] = await Promise.all([
+    QuizAttempt.find({ project: projectId, user: userId, status: 'evaluated' })
+      .select('createdAt')
+      .sort({ createdAt: -1 })
+      .limit(60),
+    QuizSession.find({ project: projectId, user: userId, status: 'completed' })
+      .select('completedAt')
+      .sort({ completedAt: -1 })
+      .limit(60),
+  ]);
+
+  if (attempts.length === 0 && adaptiveSessions.length === 0) return 0;
+
+  const days = new Set([
+    ...attempts.map((a) => a.createdAt.toISOString().slice(0, 10)),
+    ...adaptiveSessions.filter((s) => s.completedAt).map((s) => s.completedAt.toISOString().slice(0, 10)),
+  ]);
+  let streak = 0;
+  let cursor = new Date();
+  while (true) {
+    const key = cursor.toISOString().slice(0, 10);
+    if (days.has(key)) {
+      streak += 1;
+      cursor.setDate(cursor.getDate() - 1);
+    } else {
+      break;
+    }
+  }
+  return streak;
 }
 
 async function computeStreakDays(projectId, userId) {

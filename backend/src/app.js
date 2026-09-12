@@ -11,6 +11,7 @@ const projectRoutes = require('./routes/projectRoutes');
 const materialRoutes = require('./routes/materialRoutes');
 const tutorRoutes = require('./routes/tutorRoutes');
 const quizRoutes = require('./routes/quizRoutes');
+const adaptiveQuizRoutes = require('./routes/adaptiveQuizRoutes');
 const masteryRoutes = require('./routes/masteryRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 const adminRoutes = require('./routes/adminRoutes');
@@ -40,6 +41,7 @@ app.use('/api', projectRoutes); // nested + direct project routes
 app.use('/api', materialRoutes);
 app.use('/api', tutorRoutes);
 app.use('/api', quizRoutes);
+app.use('/api', adaptiveQuizRoutes);
 app.use('/api', masteryRoutes);
 app.use('/api', analyticsRoutes);
 app.use('/api/admin', adminRoutes);

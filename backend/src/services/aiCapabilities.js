@@ -4,7 +4,6 @@ const Material = require('../models/Material');
 const QuizAttempt = require('../models/QuizAttempt');
 const AnalyticsSnapshot = require('../models/AnalyticsSnapshot');
 const { rankRelevantChunks } = require('./contextService');
-const { enqueue } = require('./jobQueue');
 
 /**
  * PRD 22 AI Application Capabilities + PRD 23 AI Decision & Action Boundaries.
@@ -210,41 +209,30 @@ async function handleGetAnalyticsSummary(_input, ctx) {
 }
 
 async function handleGenerateQuiz(_input, ctx) {
-  const Quiz = require('../models/Quiz');
+  const QuizSession = require('../models/QuizSession');
+  const { startSession } = require('./adaptiveQuizService');
 
-  // Safeguard: don't spin up a duplicate quiz if one is already generating,
-  // or a freshly-generated one hasn't been attempted yet.
-  const existing = await Quiz.findOne({
+  // Safeguard: don't spin up a duplicate session if the learner already has
+  // an active adaptive quiz in progress for this Project.
+  const existing = await QuizSession.findOne({
     project: ctx.project._id,
     user: ctx.user._id,
-    status: { $in: ['generating', 'ready'] },
+    status: 'active',
   }).sort({ createdAt: -1 });
 
   if (existing) {
-    const QuizAttemptModel = require('../models/QuizAttempt');
-    const alreadyAttempted = await QuizAttemptModel.exists({ quiz: existing._id });
-    if (!alreadyAttempted) {
-      return {
-        started: false,
-        reused: true,
-        quizId: existing._id.toString(),
-        message: `A quiz is already ${existing.status === 'generating' ? 'being generated' : 'ready'} for this Project - reusing it instead of creating a duplicate.`,
-      };
-    }
+    return {
+      started: false,
+      reused: true,
+      sessionId: existing._id.toString(),
+      message: 'An adaptive quiz is already in progress for this Project - reusing it instead of starting a duplicate.',
+    };
   }
 
-  // Reuses the exact same background job pipeline the "Generate Quiz" button
-  // uses - the AI does not get a special/bespoke write path.
-  const quiz = await Quiz.create({ user: ctx.user._id, project: ctx.project._id, status: 'generating' });
-  const job = await enqueue({
-    type: 'quiz_generation',
-    user: ctx.user._id,
-    project: ctx.project._id,
-    relatedId: quiz._id,
-  });
-  quiz.generationJob = job._id;
-  await quiz.save();
-  return { started: true, quizId: quiz._id.toString(), jobId: job._id.toString() };
+  // Reuses the exact same adaptive engine the "Start Quiz" button uses - the
+  // AI does not get a special/bespoke write path.
+  const session = await startSession(ctx.project, ctx.user);
+  return { started: true, sessionId: session._id.toString() };
 }
 
 async function handleRecordLearningEvent(input, ctx) {

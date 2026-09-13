@@ -167,9 +167,37 @@ function AIUsagePanel() {
                 <td className="p-3 text-red-600">{p.errorCount}</td>
                 <td className="p-3">${p.totalCostUsd.toFixed(4)}</td>
               </tr>
-            ))}
+                       ))}
           </tbody>
         </table>
+      </div>
+
+      <div>
+        <h3 className="font-semibold text-slate-700 mb-3">By Provider / Prompt Version</h3>
+        <div className="card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-slate-500 text-left">
+              <tr>
+                <th className="p-3">Provider</th>
+                <th className="p-3">Prompt Version</th>
+                <th className="p-3">Requests</th>
+                <th className="p-3">Errors</th>
+                <th className="p-3">Est. Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data.byProvider || []).map((p, i) => (
+                <tr key={i} className="border-t border-slate-100">
+                  <td className="p-3 font-medium text-slate-800">{p._id.provider}</td>
+                  <td className="p-3 text-slate-500">{p._id.promptVersion}</td>
+                  <td className="p-3">{p.count}</td>
+                  <td className="p-3 text-red-600">{p.errorCount}</td>
+                  <td className="p-3">${p.totalCostUsd.toFixed(4)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

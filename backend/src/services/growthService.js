@@ -7,6 +7,7 @@ const GrowthSnapshot = require('../models/GrowthSnapshot');
 const { callClaude, parseJSONResponse } = require('./aiService');
 const { emitEvent } = require('./eventBus');
 const { EVENT_TYPES } = require('../constants/eventTypes');
+const { validateStructured, RECOMMENDATIONS_SCHEMA } = require('./ai/structuredValidation');
 
 async function computeGrowthBreakdown(projectId, userId) {
   const masteries = await Mastery.find({ project: projectId, user: userId }).populate('concept', 'name');
@@ -89,7 +90,8 @@ than inventing weaknesses. Respond with STRICT JSON only: {"recommendations": st
       meta: { userId: user._id, projectId: project._id },
     });
     const parsed = parseJSONResponse(raw);
-    if (Array.isArray(parsed.recommendations) && parsed.recommendations.length > 0) {
+    const { valid } = validateStructured(parsed, RECOMMENDATIONS_SCHEMA);
+    if (valid && parsed.recommendations.length > 0) {
       return parsed.recommendations.slice(0, 3);
     }
   } catch (err) {

@@ -5,6 +5,7 @@ const { buildProjectContext } = require('./contextService');
 const { updateMasteryForAnswer } = require('./masteryService');
 const { emitEvent } = require('./eventBus');
 const { EVENT_TYPES } = require('../constants/eventTypes');
+const { validateStructured, QUIZ_QUESTION_SCHEMA, OPEN_ENDED_EVALUATION_SCHEMA } = require('./ai/structuredValidation');
 
 /**
  * PRD 25 Adaptive Assessment + PRD 26 Adaptive Quiz Flow.
@@ -109,12 +110,14 @@ Respond with STRICT JSON only in this exact shape:
     },
   });
 
-  const parsed = parseJSONResponse(raw);
+    const parsed = parseJSONResponse(raw);
 
-  // Backend validation (PRD 23 principle applied here too) - never trust
-  // model output blindly, even for its own generated question shape.
-  if (!parsed.prompt || !parsed.correctAnswer || !['mcq', 'true_false', 'short_answer'].includes(parsed.type)) {
-    throw new Error('Generated question failed validation');
+  // PRD 42 Structured AI Outputs: validate against the shared schema before
+  // acting on it - never trust model output blindly, even for its own
+  // generated question shape.
+  const { valid, errors } = validateStructured(parsed, QUIZ_QUESTION_SCHEMA);
+  if (!valid) {
+    throw new Error(`Generated question failed structural validation: ${errors.join('; ')}`);
   }
 
   return {
@@ -166,6 +169,10 @@ Focus on: <missing concept 1>, <missing concept 2>." Never just a bare verdict l
       meta: { userId: user._id, projectId: project._id },
     });
     const parsed = parseJSONResponse(raw);
+    const { valid, errors } = validateStructured(parsed, OPEN_ENDED_EVALUATION_SCHEMA);
+    if (!valid) {
+      throw new Error(`Evaluation response failed structural validation: ${errors.join('; ')}`);
+    }
     return {
       isCorrect: !!parsed.isCorrect,
       understanding: parsed.understanding || '',

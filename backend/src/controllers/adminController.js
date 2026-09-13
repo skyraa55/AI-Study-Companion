@@ -86,13 +86,24 @@ const updateUserStatus = asyncHandler(async (req, res) => {
 
 // PRD 3.6 Observable AI -> AI usage: requests, latency, failures, tokens, cost
 const getAIUsageSummary = asyncHandler(async (req, res) => {
-  const [byPurpose, totals] = await Promise.all([
+  const [byPurpose, byProvider, totals] = await Promise.all([
     AIRequestLog.aggregate([
       {
         $group: {
           _id: '$purpose',
           count: { $sum: 1 },
           avgLatencyMs: { $avg: '$latencyMs' },
+          totalCostUsd: { $sum: '$estimatedCostUsd' },
+          errorCount: { $sum: { $cond: [{ $eq: ['$status', 'error'] }, 1, 0] } },
+        },
+      },
+      { $sort: { count: -1 } },
+    ]),
+    AIRequestLog.aggregate([
+      {
+        $group: {
+          _id: { provider: '$provider', promptVersion: '$promptVersion' },
+          count: { $sum: 1 },
           totalCostUsd: { $sum: '$estimatedCostUsd' },
           errorCount: { $sum: { $cond: [{ $eq: ['$status', 'error'] }, 1, 0] } },
         },
@@ -114,7 +125,7 @@ const getAIUsageSummary = asyncHandler(async (req, res) => {
     ]),
   ]);
 
-  res.json({ totals: totals[0] || {}, byPurpose });
+  res.json({ totals: totals[0] || {}, byPurpose, byProvider });
 });
 
 const getAIRequestLogs = asyncHandler(async (req, res) => {

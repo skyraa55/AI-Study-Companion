@@ -8,6 +8,27 @@ const { buildProjectContext } = require('./contextService');
 const { updateMasteryFromAttempt } = require('./masteryService');
 const { emitEvent } = require('./eventBus');
 const { EVENT_TYPES } = require('../constants/eventTypes');
+const { validateStructured, QUIZ_QUESTION_SCHEMA } = require('./ai/structuredValidation');
+
+// PRD 42: shape for the batch short-answer grading response used below
+const BATCH_GRADING_SCHEMA = {
+  type: 'object',
+  required: ['results'],
+  properties: {
+    results: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['questionId', 'isCorrect'],
+        properties: {
+          questionId: { type: 'string', minLength: 1 },
+          isCorrect: { type: 'boolean' },
+          note: { type: 'string' },
+        },
+      },
+    },
+  },
+};
 
 /**
  * Chooses which concepts the next quiz should target: weaker/needs-attention
@@ -139,23 +160,36 @@ remaining questions can be any type. Target these concepts when relevant: ${
       },
     });
 
-    const parsed = parseJSONResponse(raw);
+       const parsed = parseJSONResponse(raw);
     if (!Array.isArray(parsed.questions) || parsed.questions.length === 0) {
       throw new Error('AI returned no questions');
     }
 
-    // Backend validation, not blind trust in model output (mirrors PRD 23's
-    // principle applied here to quiz content): enforce the required type mix
-    // rather than assuming the model followed instructions.
-    const hasMcq = parsed.questions.some((q) => q.type === 'mcq');
-    const hasOpenEnded = parsed.questions.some((q) => q.type === 'short_answer');
+    // PRD 42 Structured AI Outputs: validate every question against the
+    // shared schema BEFORE persisting - never trust AI-generated structure
+    // blindly. Invalid questions are dropped rather than silently kept.
+    const validQuestions = [];
+    for (const [i, q] of parsed.questions.entries()) {
+      const { valid, errors } = validateStructured(q, QUIZ_QUESTION_SCHEMA);
+      if (valid) {
+        validQuestions.push(q);
+      } else {
+        console.warn(`[quizService] Dropping invalid generated question #${i} for quiz ${quiz._id}:`, errors.join('; '));
+      }
+    }
+    if (validQuestions.length === 0) {
+      throw new Error('AI returned no questions that passed structural validation');
+    }
+
+    const hasMcq = validQuestions.some((q) => q.type === 'mcq');
+    const hasOpenEnded = validQuestions.some((q) => q.type === 'short_answer');
     if (!hasMcq || !hasOpenEnded) {
       console.warn(
         `[quizService] Generated quiz ${quiz._id} did not satisfy the required mcq+open-ended mix (hasMcq=${hasMcq}, hasOpenEnded=${hasOpenEnded}) - keeping questions as-is but flagging in notes.`
       );
     }
 
-    quiz.questions = parsed.questions;
+    quiz.questions = validQuestions;
     quiz.adaptiveContext = {
       targetedConcepts: concepts,
       generationNotes: notes + (!hasMcq || !hasOpenEnded ? ' (Note: requested type mix was not fully met by the model.)' : ''),
@@ -221,9 +255,13 @@ Respond with STRICT JSON only:
       meta: { userId: attempt.user, projectId: attempt.project },
     });
 
-    try {
+       try {
       const parsed = parseJSONResponse(raw);
-      const resultMap = new Map((parsed.results || []).map((r) => [r.questionId, r]));
+      const { valid, errors } = validateStructured(parsed, BATCH_GRADING_SCHEMA);
+      if (!valid) {
+        throw new Error(`Grading response failed structural validation: ${errors.join('; ')}`);
+      }
+      const resultMap = new Map(parsed.results.map((r) => [r.questionId, r]));
       for (const answer of attempt.answers) {
         const result = resultMap.get(answer.questionId.toString());
         if (result) {

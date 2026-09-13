@@ -13,7 +13,9 @@ const aiRequestLogSchema = new mongoose.Schema(
       required: true,
     },
 
-    model: { type: String, default: '' },
+       model: { type: String, default: '' },
+    provider: { type: String, default: 'anthropic' }, // PRD 41 Request metadata / model selection
+    promptVersion: { type: String, default: '1.0' }, // PRD 41 Prompt versioning
     promptPreview: { type: String, default: '' }, // truncated, not full prompt (avoid bloat)
 
     latencyMs: { type: Number, default: 0 },

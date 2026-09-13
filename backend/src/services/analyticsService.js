@@ -14,6 +14,7 @@ const GrowthSnapshot = require('../models/GrowthSnapshot');
 const { callClaude, parseJSONResponse } = require('./aiService');
 const { emitEvent } = require('./eventBus');
 const { EVENT_TYPES } = require('../constants/eventTypes');
+const { validateStructured, RECOMMENDATIONS_SCHEMA } = require('./ai/structuredValidation');
 
 async function computeProjectMetrics(projectId, userId) {
   const [attempts, adaptiveSessions, masteries, conversations] = await Promise.all([
@@ -100,8 +101,12 @@ than inventing weaknesses. Respond with STRICT JSON only: {"recommendations": st
       maxTokens: 500,
       meta: { userId: project.user, projectId: project._id },
     });
-    const parsed = parseJSONResponse(raw);
-    return Array.isArray(parsed.recommendations) ? parsed.recommendations : [];
+       const parsed = parseJSONResponse(raw);
+    const { valid, errors } = validateStructured(parsed, RECOMMENDATIONS_SCHEMA);
+    if (!valid) {
+      throw new Error(`Recommendations response failed structural validation: ${errors.join('; ')}`);
+    }
+    return parsed.recommendations;
   } catch (err) {
     if (metrics.quizzesTaken === 0) return ['Add materials and take your first adaptive quiz to establish a baseline.'];
     if (weakConcepts.length > 0) return [`Review ${weakConcepts[0]} with the AI Tutor, then retake a short quiz.`];

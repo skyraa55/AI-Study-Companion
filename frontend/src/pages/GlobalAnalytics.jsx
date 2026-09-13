@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api/axios';
 import Loader from '../components/Loader';
-import EmptyState from '../components/EmptyState';
+import MiniTrendChart from '../components/MiniTrendChart';
+
+const shortDate = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
 export default function GlobalAnalytics() {
-  const [snapshot, setSnapshot] = useState(null);
+  const [detail, setDetail] = useState(null);
   const [loaded, setLoaded] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
 
   const load = async () => {
-    const res = await api.get('/analytics/global');
-    setSnapshot(res.data.snapshot);
+    const res = await api.get('/analytics/global/detail');
+    setDetail(res.data);
     setLoaded(true);
   };
 
@@ -18,53 +19,90 @@ export default function GlobalAnalytics() {
     load();
   }, []);
 
-  const refresh = async () => {
-    setRefreshing(true);
-    await api.post('/analytics/global/refresh');
-    let attempts = 0;
-    const poll = setInterval(async () => {
-      attempts += 1;
-      const res = await api.get('/analytics/global');
-      if (res.data.snapshot && (!snapshot || res.data.snapshot._id !== snapshot._id)) {
-        clearInterval(poll);
-        setSnapshot(res.data.snapshot);
-        setRefreshing(false);
-      } else if (attempts > 8) {
-        clearInterval(poll);
-        setRefreshing(false);
-        load();
-      }
-    }, 2000);
-  };
+  if (!loaded || !detail) return <Loader label="Loading your growth overview..." />;
 
-  if (!loaded) return <Loader label="Loading your growth overview..." />;
+  const { overallLearning, learningPerformance, aiUsage, trends } = detail;
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="space-y-8">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-800">Your Growth</h1>
           <p className="text-sm text-slate-500">A global view of learning activity across all Spaces & Projects.</p>
         </div>
-        <button onClick={refresh} disabled={refreshing} className="btn-primary">
-          {refreshing ? 'Refreshing...' : '↻ Refresh'}
-        </button>
+        <button onClick={load} className="btn-secondary text-sm">↻ Refresh</button>
       </div>
 
-      {!snapshot ? (
-        <EmptyState icon="📈" title="No global analytics yet" description="Generate a snapshot to see your learning activity across every Space and Project." />
-      ) : (
+      <Section title="Overall Learning">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Metric label="Total Quizzes" value={snapshot.metrics.quizzesTaken} />
-          <Metric label="Average Score" value={`${snapshot.metrics.averageScore}%`} />
-          <Metric label="Concepts Mastered" value={snapshot.metrics.conceptsMastered} accent="text-green-600" />
-          <Metric label="Needs Attention" value={snapshot.metrics.conceptsNeedingAttention} accent="text-amber-600" />
-          <Metric label="Longest Active Streak" value={`${snapshot.metrics.studyStreakDays}d`} />
-          <Metric label="Tutor Messages" value={snapshot.metrics.totalTutorMessages} />
-          <Metric label="Concepts Tracked" value={snapshot.metrics.conceptsTracked} />
-          <Metric label="Est. Study Time" value={`${snapshot.metrics.totalTimeMinutesEstimate}m`} />
+          <Metric label="Total Learning Activity" value={overallLearning.totalLearningActivity} />
+          <Metric label="Active Days" value={overallLearning.activeDays} />
+          <Metric label="Spaces" value={overallLearning.spaceCount} />
+          <Metric label="Projects" value={overallLearning.projectCount} />
         </div>
-      )}
+      </Section>
+
+      <Section title="Learning Performance">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <Metric label="Overall Mastery" value={`${learningPerformance.overallMastery}%`} />
+          <Metric label="Avg. Assessment Performance" value={`${learningPerformance.averageAssessmentPerformance}%`} />
+          <Metric label="Concepts Improving" value={learningPerformance.conceptsImproving} accent="text-green-600" />
+          <Metric label="Concepts Needing Attention" value={learningPerformance.conceptsNeedingAttention} accent="text-amber-600" />
+        </div>
+      </Section>
+
+      <Section title="AI Usage">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <Metric label="Tutor Interactions" value={aiUsage.tutorInteractions} />
+          <Metric label="Questions Asked" value={aiUsage.questionsAsked} />
+          <Metric label="Quiz Activity" value={aiUsage.quizActivity} />
+          <Metric label="AI-Generated Feedback" value={aiUsage.aiGeneratedFeedback} />
+        </div>
+      </Section>
+
+      <Section title="Trends">
+        <div className="grid sm:grid-cols-3 gap-4">
+          <div className="card p-4">
+            <p className="text-xs font-medium text-slate-500 mb-2">Learning Activity Over Time (14d)</p>
+            <MiniTrendChart
+              data={trends.learningActivityOverTime.map((d) => ({ date: d.date, total: d.tutorMessages + d.quizActivity }))}
+              valueKey="total"
+              labelKey="date"
+              formatLabel={shortDate}
+              color="bg-slate-400"
+            />
+          </div>
+          <div className="card p-4">
+            <p className="text-xs font-medium text-slate-500 mb-2">Mastery Over Time</p>
+            <MiniTrendChart
+              data={trends.masteryOverTime}
+              valueKey="averageMastery"
+              labelKey="date"
+              formatLabel={shortDate}
+              formatValue={(v) => `${v}%`}
+            />
+          </div>
+          <div className="card p-4">
+            <p className="text-xs font-medium text-slate-500 mb-2">Assessment Performance</p>
+            <MiniTrendChart
+              data={trends.assessmentPerformanceTrend}
+              valueKey="score"
+              labelKey="date"
+              formatLabel={shortDate}
+              formatValue={(v) => `${v}%`}
+            />
+          </div>
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function Section({ title, children }) {
+  return (
+    <div>
+      <h2 className="font-semibold text-slate-800 mb-3">{title}</h2>
+      {children}
     </div>
   );
 }

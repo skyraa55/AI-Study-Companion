@@ -6,7 +6,8 @@ const Project = require('../models/Project');
 const { callClaude, parseJSONResponse } = require('./aiService');
 const { buildProjectContext } = require('./contextService');
 const { updateMasteryFromAttempt } = require('./masteryService');
-const { enqueue } = require('./jobQueue');
+const { emitEvent } = require('./eventBus');
+const { EVENT_TYPES } = require('../constants/eventTypes');
 
 /**
  * Chooses which concepts the next quiz should target: weaker/needs-attention
@@ -246,15 +247,14 @@ Respond with STRICT JSON only:
   attempt.status = 'evaluated';
   await attempt.save();
 
-    await updateMasteryFromAttempt(attempt, quiz);
+  await updateMasteryFromAttempt(attempt, quiz);
 
-  enqueue({
-    type: 'growth_analysis',
+  emitEvent(EVENT_TYPES.QUIZ_COMPLETED, {
     user: attempt.user,
     project: attempt.project,
-    relatedId: null,
-    input: { trigger: 'quiz_completed' },
-  }).catch((err) => console.error('[quizService] failed to enqueue growth_analysis:', err.message));
+    payload: { attemptId: attempt._id.toString(), score: attempt.score },
+    message: `Completed a quiz - scored ${attempt.score}%`,
+  }).catch((err) => console.error('[quizService] failed to emit QUIZ_COMPLETED:', err.message));
 
   return { attemptId: attempt._id, score: attempt.score };
 }

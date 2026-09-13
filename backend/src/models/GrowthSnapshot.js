@@ -24,7 +24,7 @@ const growthSnapshotSchema = new mongoose.Schema(
 
     trigger: {
       type: String,
-      enum: ['manual_refresh', 'quiz_completed', 'repeated_mistake_pattern'],
+      enum: ['manual_refresh', 'quiz_completed', 'repeated_mistake_pattern', 'material_processed'],
       default: 'manual_refresh',
     },
 

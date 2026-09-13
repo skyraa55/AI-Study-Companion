@@ -2,6 +2,8 @@ const Concept = require('../models/Concept');
 const Mastery = require('../models/Mastery');
 const Project = require('../models/Project');
 const { enqueue } = require('./jobQueue');
+const { emitEvent } = require('./eventBus');
+const { EVENT_TYPES } = require('../constants/eventTypes');
 
 const HISTORY_CAP = 10;
 const REPEATED_MISTAKE_THRESHOLD = 3;
@@ -53,8 +55,15 @@ async function updateMasteryFromAttempt(attempt, quiz) {
       mastery.patternFlaggedAt = null;
     }
 
-    await mastery.save();
+        await mastery.save();
     await maybeFlagRepeatedMistakePattern(attempt.project, attempt.user, mastery);
+
+    emitEvent(EVENT_TYPES.MASTERY_UPDATED, {
+      user: attempt.user,
+      project: attempt.project,
+      payload: { concept: conceptName, masteryScore: mastery.masteryScore, trend: mastery.trend },
+      message: `Mastery updated for "${conceptName}"`,
+    }).catch(() => {});
   }
 
   await recalculateProjectProgress(attempt.project);
@@ -97,8 +106,15 @@ async function updateMasteryForAnswer({ projectId, userId, conceptName, isCorrec
     mastery.consecutiveMisses += 1;
   }
 
-  await mastery.save();
+   await mastery.save();
   await maybeFlagRepeatedMistakePattern(projectId, userId, mastery);
+
+  emitEvent(EVENT_TYPES.MASTERY_UPDATED, {
+    user: userId,
+    project: projectId,
+    payload: { concept: conceptName, masteryScore: mastery.masteryScore, trend: mastery.trend },
+    message: `Mastery updated for "${conceptName}"`,
+  }).catch(() => {});
 
   await recalculateProjectProgress(projectId);
   return mastery;

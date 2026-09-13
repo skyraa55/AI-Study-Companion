@@ -4,6 +4,8 @@ const Concept = require('../models/Concept');
 const Mastery = require('../models/Mastery');
 const { callClaude, parseJSONResponse } = require('./aiService');
 const { updateProgress } = require('./jobQueue');
+const { emitEvent } = require('./eventBus');
+const { EVENT_TYPES } = require('../constants/eventTypes');
 
 const CHUNK_SIZE = 900;
 const MIN_CHARS_PER_PAGE_FOR_TEXT = 15;
@@ -74,9 +76,16 @@ async function processMaterialJob(job) {
   const material = await Material.findById(materialId);
   if (!material) throw new Error('Material not found');
 
-  material.processingStatus = 'processing';
+   material.processingStatus = 'processing';
   material.retryCount = job.retryCount;
   await setStage(material, job, 'reading_content', 10);
+
+  emitEvent(EVENT_TYPES.MATERIAL_PROCESSING_STARTED, {
+    user: material.user,
+    project: material.project,
+    payload: { materialId: material._id.toString(), title: material.title },
+    message: `Started processing "${material.title}"`,
+  }).catch(() => {});
 
   try {
     let text = material.rawContent;
@@ -141,6 +150,13 @@ async function processMaterialJob(job) {
       );
     }
 
+        emitEvent(EVENT_TYPES.MATERIAL_PROCESSING_COMPLETED, {
+      user: material.user,
+      project: material.project,
+      payload: { materialId: material._id.toString(), title: material.title },
+      message: `Finished processing "${material.title}"`,
+    }).catch(() => {});
+
     return {
       materialId: material._id,
       conceptsExtracted: extraction.keyConcepts.length,
@@ -150,16 +166,28 @@ async function processMaterialJob(job) {
   } catch (err) {
     const isFinalAttempt = job.retryCount >= job.maxRetries;
 
-    material.processingError = err.message;
+        material.processingError = err.message;
     if (isFinalAttempt) {
       material.processingStatus = 'failed';
       material.processingStage = 'failed';
     } else {
+      // Clear "will retry" signal for the UI - jobQueue will re-invoke this
+      // handler automatically after a backoff delay.
       material.processingStatus = 'pending';
       material.processingStage = 'queued';
     }
     await material.save();
-    throw err;
+
+    if (isFinalAttempt) {
+      emitEvent(EVENT_TYPES.MATERIAL_PROCESSING_FAILED, {
+        user: material.user,
+        project: material.project,
+        payload: { materialId: material._id.toString(), title: material.title, error: err.message },
+        message: `Failed to process "${material.title}"`,
+      }).catch(() => {});
+    }
+
+    throw err; // let jobQueue decide retry vs permanent failure
   } finally {
     if (job.input?.filePath) {
       fs.unlink(job.input.filePath, () => {});

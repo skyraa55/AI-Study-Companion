@@ -5,6 +5,8 @@ const QuizAttempt = require('../models/QuizAttempt');
 const Material = require('../models/Material');
 const GrowthSnapshot = require('../models/GrowthSnapshot');
 const { callClaude, parseJSONResponse } = require('./aiService');
+const { emitEvent } = require('./eventBus');
+const { EVENT_TYPES } = require('../constants/eventTypes');
 
 async function computeGrowthBreakdown(projectId, userId) {
   const masteries = await Mastery.find({ project: projectId, user: userId }).populate('concept', 'name');
@@ -125,11 +127,18 @@ async function growthAnalysisJob(job) {
     trigger: job.input?.trigger || 'manual_refresh',
   });
 
-  project.growthState = {
+    project.growthState = {
     lastRecommendations: recommendations,
     lastGeneratedAt: new Date(),
   };
   await project.save();
+
+  emitEvent(EVENT_TYPES.RECOMMENDATION_GENERATED, {
+    user: user._id,
+    project: projectId,
+    payload: { snapshotId: snapshot._id.toString(), source: 'growth', trigger: snapshot.trigger },
+    message: 'New growth recommendations generated',
+  }).catch(() => {});
 
   return { snapshotId: snapshot._id };
 }

@@ -1,6 +1,8 @@
 const Space = require('../models/Space');
 const Project = require('../models/Project');
 const asyncHandler = require('../utils/asyncHandler');
+const { emitEvent } = require('../services/eventBus');
+const { EVENT_TYPES } = require('../constants/eventTypes');
 
 const createSpace = asyncHandler(async (req, res) => {
   const { name, description, icon, color } = req.body;
@@ -13,6 +15,14 @@ const createSpace = asyncHandler(async (req, res) => {
     icon: icon || '📘',
     color: color || '#6366f1',
   });
+
+  emitEvent(EVENT_TYPES.SPACE_CREATED, {
+    user: req.user._id,
+    space: space._id,
+    payload: { name: space.name },
+    message: `Created Space "${space.name}"`,
+  }).catch(() => {});
+
   res.status(201).json({ space });
 });
 

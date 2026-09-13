@@ -3,7 +3,8 @@ const Mastery = require('../models/Mastery');
 const { callClaude, parseJSONResponse } = require('./aiService');
 const { buildProjectContext } = require('./contextService');
 const { updateMasteryForAnswer } = require('./masteryService');
-const { enqueue } = require('./jobQueue');
+const { emitEvent } = require('./eventBus');
+const { EVENT_TYPES } = require('../constants/eventTypes');
 
 /**
  * PRD 25 Adaptive Assessment + PRD 26 Adaptive Quiz Flow.
@@ -218,6 +219,14 @@ async function startSession(project, user, targetQuestionCount = 8) {
   const question = await generateAdaptiveQuestion(project, user, session);
   session.questions.push({ ...question, askedAt: new Date() });
   await session.save();
+
+  emitEvent(EVENT_TYPES.QUIZ_STARTED, {
+    user: user._id,
+    project: project._id,
+    payload: { sessionId: session._id.toString(), targetQuestionCount },
+    message: 'Started an adaptive quiz',
+  }).catch(() => {});
+
   return session;
 }
 
@@ -280,25 +289,31 @@ async function submitAnswer(session, project, user, userAnswer) {
     correctAnswer: current.correctAnswer,
     userAnswer: current.userAnswer,
     isCorrect: current.isCorrect,
-    feedback,
+       feedback,
     evaluation,
   };
+
+  emitEvent(EVENT_TYPES.QUESTION_ANSWERED, {
+    user: user._id,
+    project: project._id,
+    payload: { concept: current.concept, isCorrect: current.isCorrect, difficulty: current.difficulty },
+    message: `Answered a quiz question (${current.concept})`,
+  }).catch(() => {});
 
   let nextQuestion = null;
   let completed = false;
 
-    if (session.questions.length >= session.targetQuestionCount) {
+  if (session.questions.length >= session.targetQuestionCount) {
     session.status = 'completed';
     session.completedAt = new Date();
     completed = true;
 
-    enqueue({
-      type: 'growth_analysis',
+    emitEvent(EVENT_TYPES.QUIZ_COMPLETED, {
       user: user._id,
       project: project._id,
-      relatedId: null,
-      input: { trigger: 'quiz_completed' },
-    }).catch((err) => console.error('[adaptiveQuizService] failed to enqueue growth_analysis:', err.message));
+      payload: { sessionId: session._id.toString(), score: session.score },
+      message: `Completed a quiz - scored ${session.score}%`,
+    }).catch((err) => console.error('[adaptiveQuizService] failed to emit QUIZ_COMPLETED:', err.message));
   } else {
     const nextQ = await generateAdaptiveQuestion(project, user, session);
     session.questions.push({ ...nextQ, askedAt: new Date() });

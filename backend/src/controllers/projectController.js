@@ -9,6 +9,8 @@ const QuizSession = require('../models/QuizSession');
 const Conversation = require('../models/Conversation');
 const AnalyticsSnapshot = require('../models/AnalyticsSnapshot');
 const asyncHandler = require('../utils/asyncHandler');
+const { emitEvent } = require('../services/eventBus');
+const { EVENT_TYPES } = require('../constants/eventTypes');
 
 const createProject = asyncHandler(async (req, res) => {
   const { spaceId } = req.params;
@@ -26,8 +28,16 @@ const createProject = asyncHandler(async (req, res) => {
     goal: goal || '',
   });
 
-  space.stats.projectCount += 1;
+    space.stats.projectCount += 1;
   await space.save();
+
+  emitEvent(EVENT_TYPES.PROJECT_CREATED, {
+    user: req.user._id,
+    project: project._id,
+    space: space._id,
+    payload: { name: project.name },
+    message: `Created Project "${project.name}"`,
+  }).catch(() => {});
 
   res.status(201).json({ project });
 });
@@ -47,6 +57,13 @@ const getProject = asyncHandler(async (req, res) => {
 
   project.lastAccessedAt = new Date();
   await project.save();
+
+  emitEvent(EVENT_TYPES.PROJECT_ACCESSED, {
+    user: req.user._id,
+    project: project._id,
+    message: 'Opened this Project',
+    dedupeKey: `project-accessed-${project._id}`,
+  }).catch(() => {});
 
   res.json({ project });
 });

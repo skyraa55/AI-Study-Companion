@@ -7,6 +7,7 @@ const TABS = [
   { key: 'users', label: 'Users' },
   { key: 'ai', label: 'AI Usage' },
   { key: 'health', label: 'System Health' },
+  { key: 'activity', label: 'Activity' },
 ];
 
 export default function Admin() {
@@ -34,7 +35,8 @@ export default function Admin() {
       {tab === 'overview' && <OverviewPanel />}
       {tab === 'users' && <UsersPanel />}
       {tab === 'ai' && <AIUsagePanel />}
-      {tab === 'health' && <SystemHealthPanel />}
+       {tab === 'health' && <SystemHealthPanel />}
+      {tab === 'activity' && <ActivityPanel />}
     </div>
   );
 }
@@ -230,6 +232,74 @@ function SystemHealthPanel() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+
+function ActivityPanel() {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    api.get('/admin/activity').then((res) => setData(res.data));
+  }, []);
+  if (!data) return <Loader label="Loading activity feed..." />;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="font-semibold text-slate-700 mb-3">Event Type Breakdown</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {data.typeBreakdown.map((t) => (
+            <Stat key={t._id} label={t._id} value={t.count} />
+          ))}
+        </div>
+      </div>
+
+      {data.failedEvents.length > 0 && (
+        <div>
+          <h3 className="font-semibold text-slate-700 mb-3">⚠️ Events With Failed Listeners</h3>
+          <div className="space-y-2">
+            {data.failedEvents.map((e) => (
+              <div key={e._id} className="card p-3 text-sm border-red-200">
+                <p className="font-medium text-slate-800">{e.type} - {e.message}</p>
+                {e.processingErrors.map((pe, i) => (
+                  <p key={i} className="text-red-600 text-xs">
+                    Listener "{pe.listener}": {pe.error}
+                  </p>
+                ))}
+                <p className="text-slate-400 text-xs">{new Date(e.createdAt).toLocaleString()}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <h3 className="font-semibold text-slate-700 mb-3">Recent Events</h3>
+        <div className="card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-slate-500 text-left">
+              <tr>
+                <th className="p-3">Type</th>
+                <th className="p-3">Message</th>
+                <th className="p-3">User</th>
+                <th className="p-3">When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.events.map((e) => (
+                <tr key={e._id} className="border-t border-slate-100">
+                  <td className="p-3"><span className="badge bg-slate-100 text-slate-600">{e.type}</span></td>
+                  <td className="p-3 text-slate-700">{e.message}</td>
+                  <td className="p-3 text-slate-500">{e.user?.email || '-'}</td>
+                  <td className="p-3 text-slate-400">{new Date(e.createdAt).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

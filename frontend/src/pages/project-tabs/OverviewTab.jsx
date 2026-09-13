@@ -13,18 +13,44 @@ const TREND_STYLE = {
   new: { icon: '✨', color: 'text-brand-600' },
 };
 
+const EVENT_ICON = {
+  SPACE_CREATED: '📁',
+  PROJECT_CREATED: '🎯',
+  PROJECT_ACCESSED: '👋',
+  MATERIAL_UPLOADED: '📄',
+  MATERIAL_PROCESSING_STARTED: '⏳',
+  MATERIAL_PROCESSING_COMPLETED: '✅',
+  MATERIAL_PROCESSING_FAILED: '⚠️',
+  TUTOR_CONVERSATION_STARTED: '🤖',
+  TUTOR_QUESTION_ASKED: '💬',
+  QUIZ_STARTED: '📝',
+  QUESTION_ANSWERED: '✏️',
+  QUIZ_COMPLETED: '🏁',
+  MASTERY_UPDATED: '🎯',
+  RECOMMENDATION_GENERATED: '🧭',
+};
+
 export default function OverviewTab({ projectId, onNavigate }) {
   const [data, setData] = useState(null);
+  const [context, setContext] = useState(null);
+  const [activity, setActivity] = useState(null);
 
   const load = () => {
     api.get(`/projects/${projectId}/dashboard`).then((res) => setData(res.data));
+    api.get(`/projects/${projectId}/learning-context`).then((res) => setContext(res.data));
+    api.get(`/projects/${projectId}/activity?limit=8`).then((res) => setActivity(res.data.events));
   };
 
   useEffect(load, [projectId]);
 
+  const removeNote = async (field, note) => {
+    await api.delete(`/projects/${projectId}/learning-context/${field}`, { data: { note } });
+    api.get(`/projects/${projectId}/learning-context`).then((res) => setContext(res.data));
+  };
+
   if (!data) return <Loader label="Loading your Project overview..." />;
 
-  const { progress, concepts, recentActivity, performance, continueLearning, recommendedNextStep, learningContext } = data;
+  const { progress, concepts, recentActivity, performance, continueLearning, recommendedNextStep } = data;
   const weakestConcepts = concepts.slice(0, 5);
   const trend = TREND_STYLE[performance.trend] || TREND_STYLE.stable;
 
@@ -114,6 +140,27 @@ export default function OverviewTab({ projectId, onNavigate }) {
             </div>
             <p className={`text-sm font-medium ${trend.color}`}>{trend.icon} {performance.trend}</p>
           </div>
+
+          <div className="card p-5">
+            <h3 className="font-semibold text-slate-800 mb-3">Activity Log</h3>
+            {!activity ? (
+              <p className="text-sm text-slate-400">Loading...</p>
+            ) : activity.length === 0 ? (
+              <p className="text-sm text-slate-400">No activity recorded yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {activity.map((e) => (
+                  <li key={e._id} className="flex items-start gap-2 text-sm">
+                    <span>{EVENT_ICON[e.type] || '•'}</span>
+                    <div className="min-w-0">
+                      <p className="text-slate-700 truncate">{e.message}</p>
+                      <p className="text-xs text-slate-400">{new Date(e.createdAt).toLocaleString()}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
 
         <div className="lg:col-span-1 space-y-6">
@@ -139,11 +186,69 @@ export default function OverviewTab({ projectId, onNavigate }) {
 
           <div className="card p-5">
             <h3 className="font-semibold text-slate-800 mb-3">Learning Context</h3>
-            <ContextRow label="Goal" items={learningContext.goal ? [learningContext.goal] : []} />
-            <ContextRow label="Important Concepts" items={learningContext.importantConcepts} />
-            <ContextRow label="Previous Difficulties" items={learningContext.previousDifficulties} />
-            <ContextRow label="Notes" items={learningContext.significantNotes} />
-            <ContextRow label="Needs Attention" items={learningContext.areasRequiringAttention} last />
+            {!context ? (
+              <p className="text-sm text-slate-400">Loading...</p>
+            ) : (
+              <>
+                {context.learningGoals.project && (
+                  <ContextRow label="Goal" items={[context.learningGoals.project]} />
+                )}
+                {context.knownStrengths.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-xs font-medium text-slate-500 mb-1">Known Strengths</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {context.knownStrengths.map((s, i) => (
+                        <span key={i} className="badge bg-green-50 text-green-700">{s.concept} ({s.masteryScore}%)</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {context.knownWeaknesses.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-xs font-medium text-slate-500 mb-1">Known Weaknesses</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {context.knownWeaknesses.map((w, i) => (
+                        <span key={i} className="badge bg-amber-50 text-amber-700">{w.concept} ({w.masteryScore}%)</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {context.assessmentContext.recentMistakeConcepts.length > 0 && (
+                  <ContextRow label="Recent Mistakes" items={context.assessmentContext.recentMistakeConcepts} />
+                )}
+                <EditableContextRow
+                  label="Important Concepts"
+                  items={context.curatedNotes.importantConcepts}
+                  onRemove={(note) => removeNote('importantConcepts', note)}
+                />
+                <EditableContextRow
+                  label="Previous Difficulties"
+                  items={context.curatedNotes.previousDifficulties}
+                  onRemove={(note) => removeNote('previousDifficulties', note)}
+                />
+                <EditableContextRow
+                  label="Notes"
+                  items={context.curatedNotes.significantNotes}
+                  onRemove={(note) => removeNote('significantNotes', note)}
+                />
+                <EditableContextRow
+                  label="Needs Attention"
+                  items={context.curatedNotes.areasRequiringAttention}
+                  onRemove={(note) => removeNote('areasRequiringAttention', note)}
+                  last
+                />
+                {context.importantTutorContext.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-slate-100">
+                    <p className="text-xs font-medium text-slate-500 mb-1">Important Tutor Context</p>
+                    {context.importantTutorContext.slice(0, 2).map((c, i) => (
+                      <p key={i} className="text-xs text-slate-500 mb-1 line-clamp-2">
+                        <span className="font-medium text-slate-600">{c.title}:</span> {c.summary}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -167,6 +272,23 @@ function ContextRow({ label, items, last }) {
       <div className="flex flex-wrap gap-1.5">
         {items.map((item, i) => (
           <span key={i} className="badge bg-slate-100 text-slate-600">{item}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EditableContextRow({ label, items, onRemove, last }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div className={last ? '' : 'mb-3'}>
+      <p className="text-xs font-medium text-slate-500 mb-1">{label}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((item, i) => (
+          <span key={i} className="badge bg-slate-100 text-slate-600 group flex items-center gap-1">
+            {item}
+            <button onClick={() => onRemove(item)} className="text-slate-400 hover:text-red-500" title="Remove">×</button>
+          </span>
         ))}
       </div>
     </div>

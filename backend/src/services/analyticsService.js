@@ -12,6 +12,8 @@ const AIRequestLog = require('../models/AIRequestLog');
 const AnalyticsSnapshot = require('../models/AnalyticsSnapshot');
 const GrowthSnapshot = require('../models/GrowthSnapshot');
 const { callClaude, parseJSONResponse } = require('./aiService');
+const { emitEvent } = require('./eventBus');
+const { EVENT_TYPES } = require('../constants/eventTypes');
 
 async function computeProjectMetrics(projectId, userId) {
   const [attempts, adaptiveSessions, masteries, conversations] = await Promise.all([
@@ -120,13 +122,20 @@ async function aggregateProjectAnalyticsJob(job) {
 
   const recommendations = await generateRecommendations(project, metrics, weakConcepts);
 
-  const snapshot = await AnalyticsSnapshot.create({
+   const snapshot = await AnalyticsSnapshot.create({
     user: project.user,
     scope: 'project',
     project: project._id,
     metrics,
     recommendations,
   });
+
+  emitEvent(EVENT_TYPES.RECOMMENDATION_GENERATED, {
+    user: project.user,
+    project: project._id,
+    payload: { snapshotId: snapshot._id.toString(), source: 'analytics' },
+    message: 'New analytics recommendations generated',
+  }).catch(() => {});
 
   return { snapshotId: snapshot._id };
 }

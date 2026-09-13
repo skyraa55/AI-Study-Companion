@@ -8,6 +8,7 @@ const {
   getAIRequestLogs,
   getSystemHealth,
   listBackgroundJobs,
+  listActivityEvents,
 } = require('../controllers/adminController');
 const { protect } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/admin');
@@ -23,5 +24,6 @@ router.get('/ai-usage', getAIUsageSummary);
 router.get('/ai-logs', getAIRequestLogs);
 router.get('/system-health', getSystemHealth);
 router.get('/jobs', listBackgroundJobs);
+router.get('/activity', listActivityEvents);
 
 module.exports = router;

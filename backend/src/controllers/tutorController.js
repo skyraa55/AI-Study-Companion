@@ -5,6 +5,8 @@ const asyncHandler = require('../utils/asyncHandler');
 const { callClaude, callClaudeWithTools } = require('../services/aiService');
 const { assembleTutorContext } = require('../services/contextService');
 const { TOOLS, executeCapability, SIDE_EFFECT_TOOLS } = require('../services/aiCapabilities');
+const { emitEvent } = require('../services/eventBus');
+const { EVENT_TYPES } = require('../constants/eventTypes');
 
 const SUMMARIZE_EVERY_N_MESSAGES = 10;
 
@@ -17,6 +19,14 @@ const createConversation = asyncHandler(async (req, res) => {
     project: project._id,
     title: req.body.title || 'Tutor Session',
   });
+
+  emitEvent(EVENT_TYPES.TUTOR_CONVERSATION_STARTED, {
+    user: req.user._id,
+    project: project._id,
+    payload: { conversationId: conversation._id.toString() },
+    message: 'Started a new Tutor session',
+  }).catch(() => {});
+
   res.status(201).json({ conversation });
 });
 
@@ -50,8 +60,14 @@ const sendMessage = asyncHandler(async (req, res) => {
   const { content } = req.body;
   if (!content || !content.trim()) return res.status(400).json({ message: 'Message content is required.' });
 
-  const userMessage = await Message.create({ conversation: conversation._id, role: 'user', content });
+    const userMessage = await Message.create({ conversation: conversation._id, role: 'user', content });
 
+  emitEvent(EVENT_TYPES.TUTOR_QUESTION_ASKED, {
+    user: req.user._id,
+    project: project._id,
+    payload: { conversationId: conversation._id.toString() },
+    message: 'Asked the Tutor a question',
+  }).catch(() => {});
   const { shortTermHistory, longTermContext, projectKnowledge, evidenceStatus, relevantChunks } =
     await assembleTutorContext({ project, user: req.user, conversation, query: content });
 

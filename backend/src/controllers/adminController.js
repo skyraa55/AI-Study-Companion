@@ -6,6 +6,7 @@ const QuizAttempt = require('../models/QuizAttempt');
 const Conversation = require('../models/Conversation');
 const AIRequestLog = require('../models/AIRequestLog');
 const BackgroundJob = require('../models/BackgroundJob');
+const ActivityEvent = require('../models/ActivityEvent');
 const asyncHandler = require('../utils/asyncHandler');
 
 // PRD: Admin Dashboard -> monitor users, learning activity, Projects, engagement
@@ -164,6 +165,29 @@ const listBackgroundJobs = asyncHandler(async (req, res) => {
   res.json({ jobs, total, page, pages: Math.ceil(total / limit) });
 });
 
+const listActivityEvents = asyncHandler(async (req, res) => {
+  const page = Math.max(parseInt(req.query.page) || 1, 1);
+  const limit = Math.min(parseInt(req.query.limit) || 25, 100);
+  const filter = {};
+  if (req.query.type) filter.type = req.query.type;
+
+  const [events, total, typeBreakdown, failedEvents] = await Promise.all([
+    ActivityEvent.find(filter)
+      .populate('user', 'name email')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit),
+    ActivityEvent.countDocuments(filter),
+    ActivityEvent.aggregate([{ $group: { _id: '$type', count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
+    ActivityEvent.find({ 'processingErrors.0': { $exists: true } })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .select('type message processingErrors createdAt'),
+  ]);
+
+  res.json({ events, total, page, pages: Math.ceil(total / limit), typeBreakdown, failedEvents });
+});
+
 module.exports = {
   getOverview,
   listUsers,
@@ -173,4 +197,5 @@ module.exports = {
   getAIRequestLogs,
   getSystemHealth,
   listBackgroundJobs,
+  listActivityEvents,
 };

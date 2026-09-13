@@ -2,6 +2,8 @@ const Material = require('../models/Material');
 const Project = require('../models/Project');
 const asyncHandler = require('../utils/asyncHandler');
 const { enqueue } = require('../services/jobQueue');
+const { emitEvent } = require('../services/eventBus');
+const { EVENT_TYPES } = require('../constants/eventTypes');
 
 const addTextMaterial = asyncHandler(async (req, res) => {
   const project = await Project.findOne({ _id: req.params.projectId, user: req.user._id });
@@ -21,13 +23,20 @@ const addTextMaterial = asyncHandler(async (req, res) => {
     processingStage: 'queued',
   });
 
-  const job = await enqueue({
+   const job = await enqueue({
     type: 'material_processing',
     user: req.user._id,
     project: project._id,
     relatedId: material._id,
-    input: {},
+    input: {}, // no file - rawContent already stored, "reading content" stage is a quick no-op
   });
+
+  emitEvent(EVENT_TYPES.MATERIAL_UPLOADED, {
+    user: req.user._id,
+    project: project._id,
+    payload: { materialId: material._id.toString(), title: material.title, type: material.type },
+    message: `Added material "${material.title}"`,
+  }).catch(() => {});
 
   res.status(201).json({ material, jobId: job._id });
 });
@@ -48,7 +57,6 @@ const uploadFileMaterial = asyncHandler(async (req, res) => {
     processingStatus: 'pending',
     processingStage: 'queued',
   });
-
   const job = await enqueue({
     type: 'material_processing',
     user: req.user._id,
@@ -56,6 +64,13 @@ const uploadFileMaterial = asyncHandler(async (req, res) => {
     relatedId: material._id,
     input: { filePath: req.file.path, mimetype: req.file.mimetype },
   });
+
+  emitEvent(EVENT_TYPES.MATERIAL_UPLOADED, {
+    user: req.user._id,
+    project: project._id,
+    payload: { materialId: material._id.toString(), title: material.title, type: material.type },
+    message: `Added material "${material.title}"`,
+  }).catch(() => {});
 
   res.status(201).json({ material, jobId: job._id });
 });

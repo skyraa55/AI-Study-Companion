@@ -2,6 +2,7 @@ const { registerHandler } = require('./jobQueue');
 const { processMaterialJob } = require('./materialService');
 const { generateQuizJob, evaluateQuizAttemptJob } = require('./quizService');
 const { aggregateProjectAnalyticsJob, aggregateGlobalAnalyticsJob } = require('./analyticsService');
+const { growthAnalysisJob } = require('./growthService');
 
 function registerAllJobHandlers() {
   registerHandler('material_processing', processMaterialJob);
@@ -10,6 +11,7 @@ function registerAllJobHandlers() {
   registerHandler('analytics_aggregation', async (job) => {
     return job.project ? aggregateProjectAnalyticsJob(job) : aggregateGlobalAnalyticsJob(job);
   });
+  registerHandler('growth_analysis', growthAnalysisJob);
   console.log('[jobQueue] Background job handlers registered.');
 }
 

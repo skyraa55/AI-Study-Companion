@@ -4,13 +4,14 @@ const backgroundJobSchema = new mongoose.Schema(
   {
     type: {
       type: String,
-      enum: [
+           enum: [
         'material_processing',
         'quiz_generation',
         'quiz_evaluation',
         'mastery_update',
         'analytics_aggregation',
         'recommendation_generation',
+        'growth_analysis',
       ],
       required: true,
     },

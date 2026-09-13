@@ -9,17 +9,18 @@ import MaterialsTab from './project-tabs/MaterialsTab';
 import TutorTab from './project-tabs/TutorTab';
 import QuizTab from './project-tabs/QuizTab';
 import MasteryTab from './project-tabs/MasteryTab';
+import GrowthTab from './project-tabs/GrowthTab';
 import AnalyticsTab from './project-tabs/AnalyticsTab';
 
 const TABS = [
-   { key: 'overview', label: '🏠 Overview' },
+  { key: 'overview', label: '🏠 Overview' },
   { key: 'materials', label: '📄 Materials' },
   { key: 'tutor', label: '🤖 AI Tutor' },
   { key: 'quiz', label: '📝 Quiz' },
   { key: 'mastery', label: '🎯 Mastery' },
+  { key: 'growth', label: '🌱 Growth' },
   { key: 'analytics', label: '📊 Analytics' },
 ];
-
 export default function ProjectDetail() {
   const { projectId } = useParams();
   const [summary, setSummary] = useState(null);
@@ -81,6 +82,7 @@ export default function ProjectDetail() {
       {activeTab === 'tutor' && <TutorTab projectId={projectId} project={project} onNavigate={setActiveTab} />}
       {activeTab === 'quiz' && <QuizTab projectId={projectId} onChange={loadSummary} />}
       {activeTab === 'mastery' && <MasteryTab projectId={projectId} />}
+      {activeTab === 'growth' && <GrowthTab projectId={projectId} />}
       {activeTab === 'analytics' && <AnalyticsTab projectId={projectId} />}
     </div>
   );

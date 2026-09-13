@@ -17,8 +17,15 @@ const projectSchema = new mongoose.Schema(
       areasRequiringAttention: [{ type: String }],
     },
 
-    progress: { type: Number, default: 0 }, // 0-100, derived from mastery
+       progress: { type: Number, default: 0 }, // 0-100, derived from mastery
     status: { type: String, enum: ['active', 'completed', 'paused'], default: 'active' },
+
+    // PRD 32 "Previous recommendations" - lets the growth recommendation
+    // generator avoid repeating itself verbatim across refreshes.
+    growthState: {
+      lastRecommendations: [{ type: String }],
+      lastGeneratedAt: { type: Date, default: null },
+    },
 
     lastAccessedAt: { type: Date, default: Date.now },
     archived: { type: Boolean, default: false },

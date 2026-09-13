@@ -14,6 +14,7 @@ const quizRoutes = require('./routes/quizRoutes');
 const adaptiveQuizRoutes = require('./routes/adaptiveQuizRoutes');
 const masteryRoutes = require('./routes/masteryRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
+const growthRoutes = require('./routes/growthRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
@@ -44,6 +45,7 @@ app.use('/api', quizRoutes);
 app.use('/api', adaptiveQuizRoutes);
 app.use('/api', masteryRoutes);
 app.use('/api', analyticsRoutes);
+app.use('/api', growthRoutes);
 app.use('/api/admin', adminRoutes);
 
 app.use(notFound);

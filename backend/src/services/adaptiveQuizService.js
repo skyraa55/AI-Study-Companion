@@ -3,6 +3,7 @@ const Mastery = require('../models/Mastery');
 const { callClaude, parseJSONResponse } = require('./aiService');
 const { buildProjectContext } = require('./contextService');
 const { updateMasteryForAnswer } = require('./masteryService');
+const { enqueue } = require('./jobQueue');
 
 /**
  * PRD 25 Adaptive Assessment + PRD 26 Adaptive Quiz Flow.
@@ -286,10 +287,18 @@ async function submitAnswer(session, project, user, userAnswer) {
   let nextQuestion = null;
   let completed = false;
 
-  if (session.questions.length >= session.targetQuestionCount) {
+    if (session.questions.length >= session.targetQuestionCount) {
     session.status = 'completed';
     session.completedAt = new Date();
     completed = true;
+
+    enqueue({
+      type: 'growth_analysis',
+      user: user._id,
+      project: project._id,
+      relatedId: null,
+      input: { trigger: 'quiz_completed' },
+    }).catch((err) => console.error('[adaptiveQuizService] failed to enqueue growth_analysis:', err.message));
   } else {
     const nextQ = await generateAdaptiveQuestion(project, user, session);
     session.questions.push({ ...nextQ, askedAt: new Date() });

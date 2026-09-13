@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import api from '../../api/axios';
 import Loader from '../../components/Loader';
 import ProgressBar from '../../components/ProgressBar';
@@ -36,7 +35,7 @@ export default function OverviewTab({ projectId, onNavigate }) {
         <QuickAction label="📄 View Materials" onClick={() => onNavigate('materials')} />
         <QuickAction label="🤖 Ask Tutor" onClick={() => onNavigate('tutor')} />
         <QuickAction label="📝 Take Quiz" onClick={() => onNavigate('quiz')} />
-        <Link to="/analytics" className="btn-secondary text-sm">📈 View Growth</Link>
+        <QuickAction label="📈 View Growth" onClick={() => onNavigate('growth')} />
         <QuickAction label="📊 View Analytics" onClick={() => onNavigate('analytics')} />
       </div>
 

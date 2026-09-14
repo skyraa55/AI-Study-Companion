@@ -21,7 +21,7 @@ const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
 
-app.use(cors({ origin: process.env.CLIENT_URL || '*', credentials: true }));
+app.use(cors({ origin: process.env.CLIENT_URL || 'https://ai-study-companion-k7wl.vercel.app', credentials: true }));
 app.use(express.json({ limit: '2mb' }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 

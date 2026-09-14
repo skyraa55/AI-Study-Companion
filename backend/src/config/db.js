@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 async function connectDB() {
-  const uri = process.env.MONGO_URI || 'mongodb://localhost:27017/ai-study-companion';
+  const uri = process.env.MONGO_URI || 'mongodb+srv://username:gowthi_515@cluster0.cas0l.mongodb.net/ai-study-companion?retryWrites=true&w=majority';
   try {
     await mongoose.connect(uri);
     console.log(`[DB] Connected to MongoDB: ${mongoose.connection.host}/${mongoose.connection.name}`);

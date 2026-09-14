@@ -39,4 +39,8 @@
 
 const app = require('../src/app');
 
-module.exports = app;
+module.exports = (req, res) => {
+  console.log('🔥 VERCEL API FUNCTION WAS CALLED');
+
+  return app(req, res);
+};

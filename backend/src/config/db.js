@@ -1,13 +1,21 @@
 const mongoose = require('mongoose');
 
 async function connectDB() {
-  const uri = process.env.MONGO_URI || 'mongodb+srv://username:gowthi_515@cluster0.cas0l.mongodb.net/ai-study-companion?retryWrites=true&w=majority';
+  const uri = process.env.MONGO_URI;
+
+  if (!uri) {
+    throw new Error('[DB] MONGO_URI is not defined');
+  }
+
   try {
     await mongoose.connect(uri);
-    console.log(`[DB] Connected to MongoDB: ${mongoose.connection.host}/${mongoose.connection.name}`);
+
+    console.log(
+      `[DB] Connected to MongoDB: ${mongoose.connection.host}/${mongoose.connection.name}`
+    );
   } catch (err) {
     console.error('[DB] Connection error:', err.message);
-    process.exit(1);
+    throw err;
   }
 
   mongoose.connection.on('disconnected', () => {
